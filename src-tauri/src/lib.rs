@@ -1,7 +1,7 @@
 use rdev::{listen, Event, EventType};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     io::{self, Read},
     path::{Path, PathBuf},
@@ -26,6 +26,10 @@ const DEMO_PET_ID: &str = "demo";
 const MAX_PETPACK_ENTRIES: usize = 128;
 const MAX_PETPACK_FILE_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_PETPACK_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
+const PETPACK_METADATA_FILE: &str = "petpack.json";
+const PETPACK_LICENSE_FILE: &str = "license.json";
+const PETPACK_SIGNATURE_FILE: &str = "signature.ed25519";
+const PETPACK_MANIFEST_FILE: &str = "manifest.json";
 const DEFAULT_SKIN_ID: &str = "default";
 const DEMO_SKINS: &[(&str, u64)] = &[("default", 0), ("mint", 25), ("berry", 50), ("night", 100)];
 
@@ -91,6 +95,57 @@ struct PetManifest {
     supports_skins: bool,
     skins: Vec<PetSkinCatalogItem>,
     source: Option<String>,
+}
+
+#[derive(Clone, Deserialize)]
+struct PetpackAssetDigest {
+    path: String,
+    sha256: String,
+}
+
+#[derive(Clone, Deserialize)]
+struct PetpackMetadata {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u64,
+    #[serde(rename = "packageId")]
+    package_id: String,
+    #[serde(rename = "petId")]
+    pet_id: String,
+    #[serde(rename = "petVersion")]
+    pet_version: String,
+    #[serde(rename = "minimumAppVersion")]
+    minimum_app_version: String,
+    #[serde(rename = "manifestPath")]
+    manifest_path: String,
+    #[serde(rename = "licensePath")]
+    license_path: String,
+    assets: Vec<PetpackAssetDigest>,
+}
+
+#[derive(Clone, Deserialize)]
+struct LicenseSubject {
+    #[serde(rename = "type")]
+    subject_type: String,
+    id: String,
+}
+
+#[derive(Clone, Deserialize)]
+struct PetpackLicense {
+    #[serde(rename = "licenseId")]
+    license_id: String,
+    #[serde(rename = "entitlementId")]
+    entitlement_id: String,
+    subject: LicenseSubject,
+    #[serde(rename = "petId")]
+    pet_id: String,
+    #[serde(rename = "petVersion")]
+    pet_version: String,
+    #[serde(rename = "issuedAt")]
+    issued_at: String,
+    #[serde(rename = "expiresAt")]
+    expires_at: Option<String>,
+    #[serde(rename = "revalidateAfter")]
+    revalidate_after: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -336,6 +391,145 @@ fn resolve_manifest_asset(manifest_dir: &Path, asset_path: &str) -> Result<Strin
     Ok(asset_path_within(manifest_dir, asset_path)?
         .to_string_lossy()
         .to_string())
+}
+
+fn read_json_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, String> {
+    let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    serde_json::from_str::<T>(&content).map_err(|error| error.to_string())
+}
+
+fn collect_named_file_dirs(
+    root: &Path,
+    file_name: &str,
+    found: &mut Vec<PathBuf>,
+) -> Result<(), String> {
+    for entry in fs::read_dir(root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_named_file_dirs(&path, file_name, found)?;
+        } else if entry.file_name().to_string_lossy() == file_name {
+            let parent = path
+                .parent()
+                .ok_or_else(|| "petpack metadata path has no parent".to_string())?;
+            found.push(parent.to_path_buf());
+        }
+    }
+
+    Ok(())
+}
+
+fn single_metadata_dir(package_root: &Path, file_name: &str) -> Result<Option<PathBuf>, String> {
+    let mut found = Vec::new();
+    collect_named_file_dirs(package_root, file_name, &mut found)?;
+
+    match found.len() {
+        0 => Ok(None),
+        1 => Ok(Some(found.remove(0))),
+        _ => Err(format!("petpack must contain exactly one {file_name}")),
+    }
+}
+
+fn validate_petpack_v2_metadata(
+    package_root: &Path,
+    manifest_dir: &Path,
+    manifest: &PetManifest,
+) -> Result<(), String> {
+    let petpack_dir = single_metadata_dir(package_root, PETPACK_METADATA_FILE)?;
+    let license_dir = single_metadata_dir(package_root, PETPACK_LICENSE_FILE)?;
+    let signature_dir = single_metadata_dir(package_root, PETPACK_SIGNATURE_FILE)?;
+
+    let has_any_v2_metadata =
+        petpack_dir.is_some() || license_dir.is_some() || signature_dir.is_some();
+    if !has_any_v2_metadata {
+        return Ok(());
+    }
+
+    let Some(petpack_dir) = petpack_dir else {
+        return Err("commercial petpack metadata is incomplete".to_string());
+    };
+    let Some(license_dir) = license_dir else {
+        return Err("commercial petpack metadata is incomplete".to_string());
+    };
+    let Some(signature_dir) = signature_dir else {
+        return Err("commercial petpack metadata is incomplete".to_string());
+    };
+
+    if petpack_dir != manifest_dir || license_dir != manifest_dir || signature_dir != manifest_dir {
+        return Err("commercial petpack metadata must be next to manifest.json".to_string());
+    }
+
+    let petpack_path = manifest_dir.join(PETPACK_METADATA_FILE);
+    let license_path = manifest_dir.join(PETPACK_LICENSE_FILE);
+    let signature_path = manifest_dir.join(PETPACK_SIGNATURE_FILE);
+
+    if !petpack_path.is_file() || !license_path.is_file() || !signature_path.is_file() {
+        return Err("commercial petpack metadata is incomplete".to_string());
+    }
+
+    let petpack = read_json_file::<PetpackMetadata>(&petpack_path)?;
+    let license = read_json_file::<PetpackLicense>(&license_path)?;
+
+    if petpack.schema_version != 2 {
+        return Err("unsupported petpack schema version".to_string());
+    }
+
+    if petpack.package_id.trim().is_empty()
+        || petpack.pet_version.trim().is_empty()
+        || petpack.minimum_app_version.trim().is_empty()
+    {
+        return Err("petpack metadata has required empty fields".to_string());
+    }
+
+    if petpack.pet_id != manifest.id || license.pet_id != manifest.id {
+        return Err("petpack pet id does not match manifest".to_string());
+    }
+
+    if license.pet_version != petpack.pet_version {
+        return Err("petpack license version does not match package version".to_string());
+    }
+
+    if license.license_id.trim().is_empty()
+        || license.entitlement_id.trim().is_empty()
+        || license.issued_at.trim().is_empty()
+        || license.subject.id.trim().is_empty()
+        || license.subject.subject_type != "account"
+    {
+        return Err("petpack license has invalid account metadata".to_string());
+    }
+
+    if license.expires_at.is_some() || license.revalidate_after.is_some() {
+        return Err("expiring or revalidating petpack licenses are not supported yet".to_string());
+    }
+
+    if petpack.manifest_path != PETPACK_MANIFEST_FILE
+        || petpack.license_path != PETPACK_LICENSE_FILE
+    {
+        return Err("petpack metadata paths are invalid".to_string());
+    }
+
+    if petpack.assets.is_empty() {
+        return Err("petpack must declare asset hashes".to_string());
+    }
+
+    let mut declared_assets = HashSet::new();
+    for asset in &petpack.assets {
+        if asset.path.trim().is_empty() || asset.sha256.trim().is_empty() {
+            return Err("petpack asset metadata is invalid".to_string());
+        }
+        asset_path_within(manifest_dir, &asset.path)?;
+        declared_assets.insert(asset.path.clone());
+    }
+
+    let mut runtime_assets = vec![manifest.preview_frame.clone(), manifest.idle_frame.clone()];
+    runtime_assets.extend(manifest.active_frames.iter().cloned());
+    for runtime_asset in runtime_assets {
+        if !declared_assets.contains(&runtime_asset) {
+            return Err("petpack metadata does not declare all runtime assets".to_string());
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_manifest_assets(manifest_dir: &Path, manifest: &PetManifest) -> Result<(), String> {
@@ -768,6 +962,7 @@ fn ensure_dev_imports_enabled() -> Result<(), String> {
 fn install_pet_from_directory(
     app: &AppHandle,
     app_state: &AppState,
+    package_root: &Path,
     source_dir: &Path,
     overwrite_existing: bool,
 ) -> Result<PersistedState, String> {
@@ -786,6 +981,7 @@ fn install_pet_from_directory(
     }
 
     validate_manifest_assets(source_dir, &manifest)?;
+    validate_petpack_v2_metadata(package_root, source_dir, &manifest)?;
 
     let pets_root = pets_install_dir(app)?;
     let install_dir = pets_root.join(&manifest.id);
@@ -855,7 +1051,13 @@ fn import_pet_from_folder(
 ) -> Result<PersistedState, String> {
     ensure_dev_imports_enabled()?;
     let source_dir = PathBuf::from(folder_path);
-    install_pet_from_directory(&app, state.inner(), &source_dir, overwrite_existing)
+    install_pet_from_directory(
+        &app,
+        state.inner(),
+        &source_dir,
+        &source_dir,
+        overwrite_existing,
+    )
 }
 
 #[tauri::command]
@@ -875,7 +1077,13 @@ fn import_petpack_file(
     let result = (|| {
         extract_zip_to_dir(&source_file, &extraction_dir)?;
         let pet_dir = find_manifest_dir(&extraction_dir)?;
-        install_pet_from_directory(&app, state.inner(), &pet_dir, overwrite_existing)
+        install_pet_from_directory(
+            &app,
+            state.inner(),
+            &extraction_dir,
+            &pet_dir,
+            overwrite_existing,
+        )
     })();
     let _ = fs::remove_dir_all(&extraction_dir);
     result
