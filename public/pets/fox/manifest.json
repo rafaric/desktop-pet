@@ -3,10 +3,10 @@
   "name": "Fox",
   "status": "Próximamente",
   "description": "Ejemplo de futura mascota comprada y descargada desde un petpack local.",
-  "previewFrame": "../demo/idle.png",
-  "idleFrame": "../demo/idle.png",
+  "previewFrame": "idle.png",
+  "idleFrame": "idle.png",
   "activeFrames": [
-    "../demo/active-01.png"
+    "active-01.png"
   ],
   "supportsSkins": false,
   "skins": []

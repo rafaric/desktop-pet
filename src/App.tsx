@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
@@ -61,6 +61,7 @@ type PetManifest = {
 	activeFrames: string[];
 	supportsSkins: boolean;
 	skins: PetSkinCatalogItem[];
+	source?: "bundled" | "imported";
 };
 
 type PetIndexFile = {
@@ -93,6 +94,7 @@ const defaultPetCatalog: PetManifest[] = [
 			"/pets/demo/active-05.png",
 		],
 		supportsSkins: true,
+		source: "bundled",
 		skins: [
 			{
 				id: "default",
@@ -129,6 +131,7 @@ const defaultPetCatalog: PetManifest[] = [
 		idleFrame: "/pets/demo/idle.png",
 		activeFrames: ["/pets/demo/active-01.png"],
 		supportsSkins: false,
+		source: "bundled",
 		skins: [],
 	},
 ];
@@ -154,44 +157,64 @@ function resolveManifestAsset(manifestUrl: string, assetPath: string) {
 	).toString();
 }
 
+function hydrateImportedPetAssets(pet: PetManifest): PetManifest {
+	return {
+		...pet,
+		previewFrame: convertFileSrc(pet.previewFrame),
+		idleFrame: convertFileSrc(pet.idleFrame),
+		activeFrames: pet.activeFrames.map((frame) => convertFileSrc(frame)),
+		source: "imported",
+	};
+}
+
+async function loadBundledPetCatalog(): Promise<PetManifest[]> {
+	const indexResponse = await fetch("/pets/index.json");
+	if (!indexResponse.ok) {
+		throw new Error("pet index not found");
+	}
+
+	const index = (await indexResponse.json()) as PetIndexFile;
+	const manifestResults = await Promise.allSettled(
+		index.pets.map(async (pet) => {
+			const manifestResponse = await fetch(pet.manifest);
+			if (!manifestResponse.ok) {
+				throw new Error(`manifest not found for ${pet.id}`);
+			}
+
+			const manifest = (await manifestResponse.json()) as PetManifest;
+			return {
+				...manifest,
+				source: "bundled" as const,
+				previewFrame: resolveManifestAsset(pet.manifest, manifest.previewFrame),
+				idleFrame: resolveManifestAsset(pet.manifest, manifest.idleFrame),
+				activeFrames: manifest.activeFrames.map((frame) =>
+					resolveManifestAsset(pet.manifest, frame),
+				),
+			};
+		}),
+	);
+
+	return manifestResults.reduce<PetManifest[]>((catalog, result) => {
+		if (result.status === "fulfilled") {
+			catalog.push(result.value);
+		}
+		return catalog;
+	}, []);
+}
+
 async function loadLocalPetCatalog(): Promise<PetManifest[]> {
 	try {
-		const indexResponse = await fetch("/pets/index.json");
-		if (!indexResponse.ok) {
-			throw new Error("pet index not found");
-		}
+		const [bundledPets, installedPets] = await Promise.all([
+			loadBundledPetCatalog().catch(() => defaultPetCatalog),
+			invoke<PetManifest[]>("get_installed_pet_catalog").catch(() => []),
+		]);
 
-		const index = (await indexResponse.json()) as PetIndexFile;
-		const manifestResults = await Promise.allSettled(
-			index.pets.map(async (pet) => {
-				const manifestResponse = await fetch(pet.manifest);
-				if (!manifestResponse.ok) {
-					throw new Error(`manifest not found for ${pet.id}`);
-				}
+		const mergedCatalog = [
+			...bundledPets,
+			...installedPets.map((pet) => hydrateImportedPetAssets(pet)),
+		];
 
-				const manifest = (await manifestResponse.json()) as PetManifest;
-				return {
-					...manifest,
-					previewFrame: resolveManifestAsset(
-						pet.manifest,
-						manifest.previewFrame,
-					),
-					idleFrame: resolveManifestAsset(pet.manifest, manifest.idleFrame),
-					activeFrames: manifest.activeFrames.map((frame) =>
-						resolveManifestAsset(pet.manifest, frame),
-					),
-				};
-			}),
-		);
-
-		const manifests = manifestResults
-			.filter(
-				(result): result is PromiseFulfilledResult<PetManifest> =>
-					result.status === "fulfilled",
-			)
-			.map((result) => result.value);
-
-		return manifests.length > 0 ? manifests : defaultPetCatalog;
+		return mergedCatalog.length > 0 ? mergedCatalog : defaultPetCatalog;
 	} catch {
 		return defaultPetCatalog;
 	}
@@ -231,10 +254,15 @@ function MainWindow() {
 
 	const [petCatalog, setPetCatalog] =
 		useState<PetManifest[]>(defaultPetCatalog);
+	const [importPath, setImportPath] = useState("");
 	const [position, setPosition] = useState<PetPosition>("bottom-right");
 	const [size, setSize] = useState<PetSize>("medium");
 	const [opacity, setOpacity] = useState(1);
 	const [status, setStatus] = useState("Ready to test the pet overlay.");
+	const [importFeedback, setImportFeedback] = useState<{
+		kind: "error" | "success";
+		message: string;
+	} | null>(null);
 	const [activityStats, setActivityStats] =
 		useState<ActivityStats>(initialActivityStats);
 	const [skinState, setSkinState] = useState<SkinState>(initialSkinState);
@@ -243,8 +271,12 @@ function MainWindow() {
 	);
 	const [lastActivity, setLastActivity] = useState<ActivityKind | null>(null);
 
+	async function refreshPetCatalog() {
+		setPetCatalog(await loadLocalPetCatalog());
+	}
+
 	useEffect(() => {
-		void loadLocalPetCatalog().then(setPetCatalog);
+		void refreshPetCatalog();
 	}, []);
 
 	useEffect(() => {
@@ -276,6 +308,9 @@ function MainWindow() {
 			"pet-library-updated",
 			(event) => setPetLibrary(event.payload),
 		);
+		const unlistenPetCatalog = listen<boolean>("pet-catalog-changed", () => {
+			void refreshPetCatalog();
+		});
 		const unlistenActivity = listen<ActivityEventPayload>(
 			"activity-detected",
 			(event) => {
@@ -293,6 +328,7 @@ function MainWindow() {
 			void unlistenSettings.then((unlisten) => unlisten());
 			void unlistenSkinState.then((unlisten) => unlisten());
 			void unlistenPetLibrary.then((unlisten) => unlisten());
+			void unlistenPetCatalog.then((unlisten) => unlisten());
 			void unlistenActivity.then((unlisten) => unlisten());
 			void unlistenError.then((unlisten) => unlisten());
 		};
@@ -376,6 +412,34 @@ function MainWindow() {
 		});
 	}
 
+	async function importPetFolder() {
+		setImportFeedback(null);
+
+		try {
+			if (!importPath.trim()) {
+				throw new Error("enter a local pet folder path first");
+			}
+
+			const persisted = await invoke<PersistedState>("import_pet_from_folder", {
+				folderPath: importPath,
+			});
+			setPetLibrary(persisted.pets);
+			await refreshPetCatalog();
+			setStatus("Pet imported successfully.");
+			setImportFeedback({
+				kind: "success",
+				message: "Mascota importada correctamente.",
+			});
+		} catch (error) {
+			const message = String(error);
+			setStatus(`Command failed: ${message}`);
+			setImportFeedback({
+				kind: "error",
+				message: `No se pudo importar: ${message}`,
+			});
+		}
+	}
+
 	async function unlockOrUseSkin(skin: PetSkinCatalogItem) {
 		await runSafely(async () => {
 			if (!activePetSupportsSkins) {
@@ -426,6 +490,34 @@ function MainWindow() {
 					>
 						Ocultar mascota
 					</button>
+				</div>
+
+				<div className="import-card">
+					<div>
+						<p className="eyebrow">Importar</p>
+						<h2>Instalar desde carpeta local</h2>
+						<p>
+							Pegá la ruta de una carpeta que contenga `manifest.json` y sus
+							assets. La app la copiará al almacenamiento local y actualizará la
+							biblioteca.
+						</p>
+					</div>
+					<div className="import-row">
+						<input
+							type="text"
+							value={importPath}
+							onChange={(event) => setImportPath(event.currentTarget.value)}
+							placeholder="C:\\mascotas\\mi-petpack"
+						/>
+						<button type="button" onClick={importPetFolder}>
+							Importar mascota
+						</button>
+					</div>
+					{importFeedback ? (
+						<p className={`import-feedback ${importFeedback.kind}`}>
+							{importFeedback.message}
+						</p>
+					) : null}
 				</div>
 			</section>
 
@@ -702,8 +794,12 @@ function PetOverlay() {
 	const [active, setActive] = useState(false);
 	const activeTimeout = useRef<number | null>(null);
 
+	async function refreshPetCatalog() {
+		setPetCatalog(await loadLocalPetCatalog());
+	}
+
 	useEffect(() => {
-		void loadLocalPetCatalog().then(setPetCatalog);
+		void refreshPetCatalog();
 	}, []);
 
 	useEffect(() => {
@@ -725,6 +821,12 @@ function PetOverlay() {
 		});
 		const unlistenPet = listen<string>("pet-active-changed", (event) => {
 			setPetId(event.payload);
+			if (!petCatalog.find((pet) => pet.id === event.payload)) {
+				void refreshPetCatalog();
+			}
+		});
+		const unlistenPetCatalog = listen<boolean>("pet-catalog-changed", () => {
+			void refreshPetCatalog();
 		});
 		const unlistenActivity = listen<ActivityEventPayload>(
 			"activity-detected",
@@ -745,6 +847,7 @@ function PetOverlay() {
 			void unlistenSize.then((unlisten) => unlisten());
 			void unlistenSkin.then((unlisten) => unlisten());
 			void unlistenPet.then((unlisten) => unlisten());
+			void unlistenPetCatalog.then((unlisten) => unlisten());
 			void unlistenActivity.then((unlisten) => unlisten());
 		};
 	}, []);

@@ -1,6 +1,12 @@
 use rdev::{listen, Event, EventType};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fs, path::PathBuf, sync::Mutex, thread};
+use std::{
+    collections::HashMap,
+    fs,
+    path::{Path, PathBuf},
+    sync::Mutex,
+    thread,
+};
 use tauri::{
     menu::{Menu, MenuItem, Submenu},
     tray::TrayIconBuilder,
@@ -53,6 +59,32 @@ impl Default for PetSettings {
             opacity: DEFAULT_OPACITY,
         }
     }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct PetSkinCatalogItem {
+    id: String,
+    name: String,
+    price: u64,
+    description: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct PetManifest {
+    id: String,
+    name: String,
+    status: String,
+    description: String,
+    #[serde(rename = "previewFrame")]
+    preview_frame: String,
+    #[serde(rename = "idleFrame")]
+    idle_frame: String,
+    #[serde(rename = "activeFrames")]
+    active_frames: Vec<String>,
+    #[serde(rename = "supportsSkins")]
+    supports_skins: bool,
+    skins: Vec<PetSkinCatalogItem>,
+    source: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -126,6 +158,143 @@ fn app_state_path(app: &tauri::App) -> Result<PathBuf, String> {
         .map_err(|error| error.to_string())?;
     fs::create_dir_all(&app_data_dir).map_err(|error| error.to_string())?;
     Ok(app_data_dir.join(STORE_FILE_NAME))
+}
+
+fn pets_install_dir(app_handle: &AppHandle) -> Result<PathBuf, String> {
+    let pets_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("pets");
+    fs::create_dir_all(&pets_dir).map_err(|error| error.to_string())?;
+    Ok(pets_dir)
+}
+
+fn copy_dir_recursive(source: &Path, destination: &Path) -> Result<(), String> {
+    fs::create_dir_all(destination).map_err(|error| error.to_string())?;
+
+    for entry in fs::read_dir(source).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let entry_path = entry.path();
+        let destination_path = destination.join(entry.file_name());
+
+        if entry_path.is_dir() {
+            copy_dir_recursive(&entry_path, &destination_path)?;
+        } else {
+            fs::copy(&entry_path, &destination_path).map_err(|error| error.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
+fn is_valid_pet_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-' || ch == '_')
+}
+
+fn asset_path_within(manifest_dir: &Path, asset_path: &str) -> Result<PathBuf, String> {
+    let candidate = manifest_dir.join(asset_path);
+    let canonical_candidate = candidate
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    let canonical_root = manifest_dir
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+
+    if !canonical_candidate.starts_with(&canonical_root) {
+        return Err("asset path escapes the pet folder".to_string());
+    }
+
+    Ok(canonical_candidate)
+}
+
+fn read_pet_manifest_from_path(manifest_path: &Path) -> Result<PetManifest, String> {
+    let content = fs::read_to_string(manifest_path).map_err(|error| error.to_string())?;
+    let manifest =
+        serde_json::from_str::<PetManifest>(&content).map_err(|error| error.to_string())?;
+
+    if manifest.id.trim().is_empty() {
+        return Err("manifest pet id is required".to_string());
+    }
+
+    if !is_valid_pet_id(&manifest.id) {
+        return Err("manifest pet id must be a safe slug".to_string());
+    }
+
+    if manifest.name.trim().is_empty() {
+        return Err("manifest pet name is required".to_string());
+    }
+
+    Ok(manifest)
+}
+
+fn resolve_manifest_asset(manifest_dir: &Path, asset_path: &str) -> Result<String, String> {
+    let path = Path::new(asset_path);
+    if path.is_absolute() {
+        return Ok(asset_path.to_string());
+    }
+
+    Ok(asset_path_within(manifest_dir, asset_path)?
+        .to_string_lossy()
+        .to_string())
+}
+
+fn validate_manifest_assets(manifest_dir: &Path, manifest: &PetManifest) -> Result<(), String> {
+    asset_path_within(manifest_dir, &manifest.preview_frame)?;
+    asset_path_within(manifest_dir, &manifest.idle_frame)?;
+
+    for frame in &manifest.active_frames {
+        asset_path_within(manifest_dir, frame)?;
+    }
+
+    Ok(())
+}
+
+fn list_installed_pet_manifests(app_handle: &AppHandle) -> Result<Vec<PetManifest>, String> {
+    let pets_dir = pets_install_dir(app_handle)?;
+    let mut manifests = Vec::new();
+
+    for entry in fs::read_dir(&pets_dir).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let entry_path = entry.path();
+        if !entry_path.is_dir() {
+            continue;
+        }
+
+        let manifest_path = entry_path.join("manifest.json");
+        if !manifest_path.exists() {
+            continue;
+        }
+
+        let manifest_dir = match manifest_path.parent() {
+            Some(path) => path,
+            None => continue,
+        };
+
+        let mut manifest = match read_pet_manifest_from_path(&manifest_path) {
+            Ok(manifest) => manifest,
+            Err(_) => continue,
+        };
+
+        if validate_manifest_assets(manifest_dir, &manifest).is_err() {
+            continue;
+        }
+
+        manifest.preview_frame = resolve_manifest_asset(manifest_dir, &manifest.preview_frame)?;
+        manifest.idle_frame = resolve_manifest_asset(manifest_dir, &manifest.idle_frame)?;
+        manifest.active_frames = manifest
+            .active_frames
+            .iter()
+            .map(|frame| resolve_manifest_asset(manifest_dir, frame))
+            .collect::<Result<Vec<_>, _>>()?;
+        manifest.source = Some("imported".to_string());
+        manifests.push(manifest);
+    }
+
+    Ok(manifests)
 }
 
 fn ensure_demo_pet(state: &mut PersistedState) {
@@ -207,6 +376,10 @@ fn emit_pet_library_state(app: &AppHandle, pets: &PetLibraryState) {
 
 fn emit_active_pet(app: &AppHandle, pet_id: &str) {
     let _ = app.emit("pet-active-changed", pet_id);
+}
+
+fn emit_pet_catalog_changed(app: &AppHandle) {
+    let _ = app.emit("pet-catalog-changed", true);
 }
 
 fn update_persisted_state<F>(app_state: &AppState, update: F) -> Result<PersistedState, String>
@@ -473,6 +646,68 @@ fn set_activity_tracking_enabled(
 
     emit_activity_stats(&app, &snapshot.activity);
     Ok(snapshot.activity)
+}
+
+#[tauri::command]
+fn get_installed_pet_catalog(app: AppHandle) -> Result<Vec<PetManifest>, String> {
+    list_installed_pet_manifests(&app)
+}
+
+#[tauri::command]
+fn import_pet_from_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    folder_path: String,
+) -> Result<PersistedState, String> {
+    let source_dir = PathBuf::from(folder_path);
+    if !source_dir.is_dir() {
+        return Err("selected path is not a directory".to_string());
+    }
+
+    let manifest_path = source_dir.join("manifest.json");
+    if !manifest_path.exists() {
+        return Err("manifest.json not found in selected folder".to_string());
+    }
+
+    let manifest = read_pet_manifest_from_path(&manifest_path)?;
+    if manifest.id == DEMO_PET_ID {
+        return Err("demo pet id is reserved".to_string());
+    }
+
+    validate_manifest_assets(&source_dir, &manifest)?;
+
+    let install_dir = pets_install_dir(&app)?.join(&manifest.id);
+    let pets_root = pets_install_dir(&app)?;
+    if !install_dir.starts_with(&pets_root) {
+        return Err("pet id resolves outside the install directory".to_string());
+    }
+    if install_dir.exists() {
+        fs::remove_dir_all(&install_dir).map_err(|error| error.to_string())?;
+    }
+    copy_dir_recursive(&source_dir, &install_dir)?;
+
+    let snapshot = {
+        let app_state = state.inner();
+        let mut persisted = app_state.inner.lock().map_err(|error| error.to_string())?;
+        ensure_demo_pet(&mut persisted);
+        if !persisted
+            .pets
+            .downloaded_pets
+            .iter()
+            .any(|downloaded_pet| downloaded_pet == &manifest.id)
+        {
+            persisted.pets.downloaded_pets.push(manifest.id.clone());
+        }
+        persisted.pets.active_pet_id = manifest.id.clone();
+        let snapshot = persisted.clone();
+        save_persisted_state(app_state, &snapshot)?;
+        snapshot
+    };
+
+    emit_pet_library_state(&app, &snapshot.pets);
+    emit_active_pet(&app, &snapshot.pets.active_pet_id);
+    emit_pet_catalog_changed(&app);
+    Ok(snapshot)
 }
 
 #[tauri::command]
@@ -751,7 +986,9 @@ pub fn run() {
             set_pet_opacity,
             get_activity_stats,
             get_app_state,
+            get_installed_pet_catalog,
             set_activity_tracking_enabled,
+            import_pet_from_folder,
             set_active_pet,
             unlock_skin,
             set_active_skin
