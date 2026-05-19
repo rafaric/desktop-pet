@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "web:dev": "vite web",
+    "web:build": "vite build web --outDir ../dist-web --emptyOutDir"
   },
   "dependencies": {
     "react": "^19.1.0",

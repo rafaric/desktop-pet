@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Desktop Pet Companion es una app de mascotas animadas para Windows y macOS, con tienda web y petpacks firmados para uso offline."
+    />
+    <meta property="og:title" content="Desktop Pet Companion" />
+    <meta
+      property="og:description"
+      content="Mascotas animadas coleccionables para tu escritorio. Compra en la web, instalación local y uso offline."
+    />
+    <title>Desktop Pet Companion</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Desktop Pet Companion">
+        <span class="brand-mark">🐾</span>
+        <span>Desktop Pet</span>
+      </a>
+      <nav aria-label="Navegación principal">
+        <a href="#download">Descargar</a>
+        <a href="#store">Tienda</a>
+        <a href="#how-it-works">Cómo funciona</a>
+      </nav>
+      <a class="login-link" href="#login-required">Ingresar</a>
+    </header>
+
+    <main id="top">
+      <section class="hero-section">
+        <div class="hero-copy">
+          <p class="eyebrow">Compañero decorativo para escritorio</p>
+          <h1>Una mascota animada que vive en tu escritorio.</h1>
+          <p class="summary">
+            Desktop Pet Companion es una app liviana para Windows y macOS con
+            mascotas coleccionables, animaciones locales y uso offline después
+            de instalar cada pet.
+          </p>
+          <div class="hero-actions">
+            <a class="button primary" href="#download">Descargar app</a>
+            <a class="button secondary" href="#store">Ver mascotas</a>
+          </div>
+        </div>
+        <div class="hero-preview" aria-label="Vista previa de mascota">
+          <div class="pet-bubble">🐶</div>
+          <div class="desktop-card">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="download">
+        <div>
+          <p class="eyebrow">App de escritorio</p>
+          <h2>Descargá Desktop Pet Companion</h2>
+          <p>
+            Los instaladores comerciales van a publicarse acá. Por ahora estos
+            botones son placeholders de distribución.
+          </p>
+        </div>
+        <div class="download-grid">
+          <div class="download-card placeholder" role="status">
+            <strong>Windows</strong>
+            <span>Instalador .msi / .exe · próximamente</span>
+          </div>
+          <div class="download-card placeholder" role="status">
+            <strong>macOS</strong>
+            <span>Imagen .dmg notarizada · próximamente</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="store">
+        <div class="section-heading">
+          <p class="eyebrow">Tienda</p>
+          <h2>Mascotas destacadas</h2>
+          <p>
+            Para descargar una mascota premium, el usuario debe iniciar sesión.
+            El servidor genera un petpack firmado y ligado a su cuenta.
+          </p>
+        </div>
+        <div class="pet-grid">
+          <article class="pet-card">
+            <div class="pet-art">🐶</div>
+            <h3>Chimmy</h3>
+            <p>Mascota alegre de prueba para validar petpacks comerciales.</p>
+            <div class="pet-meta">
+              <span>Premium</span>
+              <strong>USD 2.99</strong>
+            </div>
+            <a class="button small" href="#login-required"
+              >Ingresar para descargar</a
+            >
+          </article>
+          <article class="pet-card muted">
+            <div class="pet-art">🦊</div>
+            <h3>Fox</h3>
+            <p>Concept art para futura mascota con animaciones propias.</p>
+            <div class="pet-meta">
+              <span>Próximamente</span>
+              <strong>—</strong>
+            </div>
+            <span class="button small secondary disabled">Avisarme pronto</span>
+          </article>
+          <article class="pet-card muted">
+            <div class="pet-art">🐱</div>
+            <h3>Michi</h3>
+            <p>Placeholder para expandir catálogo y probar layout de tienda.</p>
+            <div class="pet-meta">
+              <span>Próximamente</span>
+              <strong>—</strong>
+            </div>
+            <span class="button small secondary disabled">Avisarme pronto</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="flow-section" id="how-it-works">
+        <p class="eyebrow">Flujo comercial</p>
+        <h2>Compra en la web, uso offline en la app.</h2>
+        <div class="flow-grid">
+          <div>
+            <span>1</span>
+            <h3>Login</h3>
+            <p>El usuario inicia sesión en la tienda web.</p>
+          </div>
+          <div>
+            <span>2</span>
+            <h3>Entitlement</h3>
+            <p>La compra habilita la descarga de esa mascota.</p>
+          </div>
+          <div>
+            <span>3</span>
+            <h3>Petpack firmado</h3>
+            <p>El backend genera un paquete ligado a la cuenta.</p>
+          </div>
+          <div>
+            <span>4</span>
+            <h3>Instalación local</h3>
+            <p>La app valida firma/licencia y permite uso offline.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="notice" id="login-required">
+        <h2>Login requerido</h2>
+        <p>
+          Este skeleton todavía no conecta un proveedor de auth. La próxima fase
+          deberá definir sesión web, entitlements y generación de petpacks.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
