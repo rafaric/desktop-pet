@@ -1,0 +1,421 @@
+openapi: 3.1.0
+info:
+  title: Desktop Pet Store API
+  version: 0.1.0
+  description: >
+    Provider-neutral API contract for the Desktop Pet landing/store, entitlements,
+    and licensed petpack downloads. Auth and payment providers are intentionally
+    abstract for the MVP design.
+servers:
+  - url: https://api.example.com
+    description: Production placeholder
+  - url: http://localhost:8787
+    description: Local development placeholder
+security:
+  - bearerAuth: []
+tags:
+  - name: catalog
+    description: Public pet and app download metadata.
+  - name: library
+    description: Signed-in user's owned pets.
+  - name: checkout
+    description: Provider-neutral purchase initiation.
+  - name: downloads
+    description: Licensed petpack generation and retrieval.
+  - name: webhooks
+    description: Payment-provider callbacks.
+paths:
+  /pets:
+    get:
+      tags: [catalog]
+      summary: List public store pets
+      description: Returns the commercial pet catalog shown on the landing/store.
+      security: []
+      responses:
+        "200":
+          description: Public catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [pets]
+                properties:
+                  pets:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PetCatalogItem"
+  /app-downloads:
+    get:
+      tags: [catalog]
+      summary: List desktop app installers
+      description: Returns installer metadata for Windows and macOS.
+      security: []
+      responses:
+        "200":
+          description: Installer metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [downloads]
+                properties:
+                  downloads:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AppDownload"
+  /me/library:
+    get:
+      tags: [library]
+      summary: List owned pets
+      description: Returns pets currently owned by the signed-in account.
+      responses:
+        "200":
+          description: User library
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [account, pets]
+                properties:
+                  account:
+                    $ref: "#/components/schemas/AccountSummary"
+                  pets:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OwnedPet"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /checkout/pets/{petId}:
+    post:
+      tags: [checkout]
+      summary: Start pet checkout
+      description: >
+        Starts a provider-neutral checkout flow. The backend may return a hosted
+        checkout URL or a provider-specific client token.
+      parameters:
+        - $ref: "#/components/parameters/PetId"
+      responses:
+        "200":
+          description: Checkout session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckoutSession"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: User already owns this pet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /downloads/pets/{petId}:
+    post:
+      tags: [downloads]
+      summary: Generate licensed petpack download
+      description: >
+        Checks ownership and creates a short-lived download for a user-bound,
+        signed petpack. The generated package must include petpack.json,
+        license.json, signature.ed25519, manifest.json, and hashed assets.
+      parameters:
+        - $ref: "#/components/parameters/PetId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                platform:
+                  type: string
+                  enum: [windows, macos]
+                  description: Optional platform hint for analytics or future variants.
+                appVersion:
+                  type: string
+                  examples: ["0.1.0"]
+      responses:
+        "201":
+          description: Download generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PetpackDownload"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: User does not own this pet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /downloads/{downloadId}:
+    get:
+      tags: [downloads]
+      summary: Fetch generated download
+      description: >
+        Streams the generated petpack or redirects to a short-lived signed object
+        storage URL. Download IDs must expire quickly.
+      parameters:
+        - name: downloadId
+          in: path
+          required: true
+          schema:
+            type: string
+          examples:
+            download:
+              value: dl_01HXAMPLE
+      responses:
+        "302":
+          description: Redirect to short-lived signed object URL
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+        "200":
+          description: Petpack file stream
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "410":
+          description: Download expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /webhooks/payment:
+    post:
+      tags: [webhooks]
+      summary: Receive payment provider webhook
+      description: >
+        Provider-specific webhook endpoint. The backend verifies the provider
+        signature against the raw request body, records the purchase, and creates
+        or updates the entitlement. Exact payload shape depends on the selected
+        payment provider.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "204":
+          description: Webhook accepted
+        "400":
+          description: Invalid webhook payload
+        "401":
+          description: Invalid webhook signature
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Provider-neutral bearer session token. Token format is intentionally unspecified.
+  parameters:
+    PetId:
+      name: petId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9_-]+$"
+      examples:
+        chimmy:
+          value: chimmy
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    AppDownload:
+      type: object
+      required: [platform, version, status]
+      properties:
+        platform:
+          type: string
+          enum: [windows, macos]
+        version:
+          type: string
+          examples: ["0.1.0"]
+        status:
+          type: string
+          enum: [available, coming_soon]
+        downloadUrl:
+          type: string
+          format: uri
+          nullable: true
+          description: Public installer URL when the installer is available.
+        sha256:
+          type: string
+          nullable: true
+          description: Optional installer checksum.
+        releaseNotesUrl:
+          type: string
+          format: uri
+          nullable: true
+    AccountSummary:
+      type: object
+      required: [id, email]
+      properties:
+        id:
+          type: string
+          examples: [user_01HXAMPLE]
+        email:
+          type: string
+          format: email
+          examples: [user@example.com]
+        displayName:
+          type: string
+          nullable: true
+          examples: ["Ada"]
+    PetCatalogItem:
+      type: object
+      required:
+        - id
+        - name
+        - description
+        - price
+        - status
+        - previewImageUrl
+      properties:
+        id:
+          type: string
+          pattern: "^[a-z0-9_-]+$"
+          examples: [chimmy]
+        name:
+          type: string
+          examples: [Chimmy]
+        description:
+          type: string
+          examples: [Mascota alegre para tu escritorio.]
+        price:
+          $ref: "#/components/schemas/Money"
+        status:
+          type: string
+          enum: [available, coming_soon, delisted]
+        previewImageUrl:
+          type: string
+          format: uri
+        tags:
+          type: array
+          items:
+            type: string
+          default: []
+    OwnedPet:
+      type: object
+      required:
+        [petId, entitlementId, petVersion, acquiredAt, downloadAvailable]
+      properties:
+        petId:
+          type: string
+          examples: [chimmy]
+        entitlementId:
+          type: string
+          examples: [ent_01HXAMPLE]
+        petVersion:
+          type: string
+          examples: ["1.0.0"]
+        acquiredAt:
+          type: string
+          format: date-time
+        downloadAvailable:
+          type: boolean
+        latestDownloadId:
+          type: string
+          nullable: true
+          examples: [dl_01HXAMPLE]
+    CheckoutSession:
+      type: object
+      required: [checkoutId, status]
+      properties:
+        checkoutId:
+          type: string
+          examples: [chk_01HXAMPLE]
+        status:
+          type: string
+          enum: [created, already_owned]
+        checkoutUrl:
+          type: string
+          format: uri
+          nullable: true
+        providerClientSecret:
+          type: string
+          nullable: true
+          description: Optional provider-specific client secret/token.
+    PetpackDownload:
+      type: object
+      required: [downloadId, petId, entitlementId, expiresAt, downloadUrl]
+      properties:
+        downloadId:
+          type: string
+          examples: [dl_01HXAMPLE]
+        petId:
+          type: string
+          examples: [chimmy]
+        entitlementId:
+          type: string
+          examples: [ent_01HXAMPLE]
+        expiresAt:
+          type: string
+          format: date-time
+        downloadUrl:
+          type: string
+          format: uri
+          description: API fetch URL, normally `/downloads/{downloadId}`. The fetch endpoint may stream the petpack or redirect to object storage.
+        sha256:
+          type: string
+          nullable: true
+          description: Optional digest of the final petpack archive for diagnostics.
+    Money:
+      type: object
+      required: [amount, currency]
+      properties:
+        amount:
+          type: integer
+          minimum: 0
+          description: Minor units, e.g. cents.
+          examples: [299]
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          examples: [USD]
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          examples: [auth_required]
+        message:
+          type: string
+          examples: [Authentication required.]
+        details:
+          type: object
+          additionalProperties: true
+          nullable: true

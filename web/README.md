@@ -44,10 +44,20 @@ Output goes to:
 dist-web/
 ```
 
+## API contract
+
+The first provider-neutral API draft lives at:
+
+```text
+services/store-api/openapi.yaml
+```
+
+It defines catalog, app downloads, owned pets, checkout, payment webhook, and licensed petpack download endpoints.
+
 ## Next implementation steps
 
 1. Replace placeholder download links with real signed/notarized installers.
 2. Add provider-neutral auth integration.
-3. Add catalog data from a backend API.
+3. Add catalog data from the store API.
 4. Add entitlement checks for owned pets.
 5. Add licensed petpack download endpoint integration.

@@ -120,11 +120,18 @@ Production builds should default both to false. The backend flag is the security
 
 ## Store API shape
 
-Provider-neutral API contract for the future web/backend:
+Provider-neutral API contract for the future web/backend is drafted in:
+
+```text
+services/store-api/openapi.yaml
+```
+
+Initial endpoint shape:
 
 | Endpoint                      | Purpose                                                               |
 | ----------------------------- | --------------------------------------------------------------------- |
 | `GET /pets`                   | Public/commercial pet catalog.                                        |
+| `GET /app-downloads`          | Windows/macOS desktop installer metadata.                             |
 | `GET /me/library`             | Pets owned by the signed-in user.                                     |
 | `POST /checkout/pets/:petId`  | Start purchase flow with the selected payment provider.               |
 | `POST /webhooks/payment`      | Receive purchase confirmation and create entitlement.                 |
