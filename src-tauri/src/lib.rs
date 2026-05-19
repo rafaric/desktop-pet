@@ -1,6 +1,6 @@
 use rdev::{listen, Event, EventType};
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf, sync::Mutex, thread};
+use std::{collections::HashMap, fs, path::PathBuf, sync::Mutex, thread};
 use tauri::{
     menu::{Menu, MenuItem, Submenu},
     tray::TrayIconBuilder,
@@ -13,6 +13,9 @@ const DEFAULT_POSITION: &str = "bottom-right";
 const DEFAULT_SIZE: &str = "medium";
 const DEFAULT_OPACITY: f64 = 1.0;
 const STORE_FILE_NAME: &str = "desktop-pet-state.json";
+const DEMO_PET_ID: &str = "demo";
+const DEFAULT_SKIN_ID: &str = "default";
+const DEMO_SKINS: &[(&str, u64)] = &[("default", 0), ("mint", 25), ("berry", 50), ("night", 100)];
 
 #[derive(Clone, Serialize, Deserialize)]
 struct ActivitySnapshot {
@@ -52,10 +55,32 @@ impl Default for PetSettings {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+struct SkinState {
+    active_skin_id: String,
+    unlocked_skins: HashMap<String, Vec<String>>,
+}
+
+impl Default for SkinState {
+    fn default() -> Self {
+        let mut unlocked_skins = HashMap::new();
+        unlocked_skins.insert(DEMO_PET_ID.to_string(), vec![DEFAULT_SKIN_ID.to_string()]);
+
+        Self {
+            active_skin_id: DEFAULT_SKIN_ID.to_string(),
+            unlocked_skins,
+        }
+    }
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct PersistedState {
+    #[serde(default)]
     activity: ActivitySnapshot,
+    #[serde(default)]
     settings: PetSettings,
+    #[serde(default)]
+    skins: SkinState,
 }
 
 #[derive(Clone, Serialize)]
@@ -86,11 +111,33 @@ fn app_state_path(app: &tauri::App) -> Result<PathBuf, String> {
     Ok(app_data_dir.join(STORE_FILE_NAME))
 }
 
+fn ensure_default_skin(state: &mut PersistedState) {
+    let unlocked = state
+        .skins
+        .unlocked_skins
+        .entry(DEMO_PET_ID.to_string())
+        .or_default();
+
+    if !unlocked.iter().any(|skin| skin == DEFAULT_SKIN_ID) {
+        unlocked.push(DEFAULT_SKIN_ID.to_string());
+    }
+
+    if state.skins.active_skin_id.is_empty()
+        || !unlocked
+            .iter()
+            .any(|skin| skin == &state.skins.active_skin_id)
+    {
+        state.skins.active_skin_id = DEFAULT_SKIN_ID.to_string();
+    }
+}
+
 fn load_persisted_state(path: &PathBuf) -> PersistedState {
-    fs::read_to_string(path)
+    let mut state = fs::read_to_string(path)
         .ok()
         .and_then(|content| serde_json::from_str::<PersistedState>(&content).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    ensure_default_skin(&mut state);
+    state
 }
 
 fn save_persisted_state(state: &AppState, snapshot: &PersistedState) -> Result<(), String> {
@@ -109,6 +156,10 @@ fn emit_activity_stats(app: &AppHandle, stats: &ActivitySnapshot) {
 
 fn emit_settings(app: &AppHandle, settings: &PetSettings) {
     let _ = app.emit("pet-settings-updated", settings);
+}
+
+fn emit_skin_state(app: &AppHandle, skins: &SkinState) {
+    let _ = app.emit("skin-state-updated", skins);
 }
 
 fn update_persisted_state<F>(app_state: &AppState, update: F) -> Result<PersistedState, String>
@@ -236,6 +287,29 @@ fn set_pet_opacity_event(app: &AppHandle, opacity: f64) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+fn set_pet_skin_event(app: &AppHandle, skin_id: &str) -> Result<(), String> {
+    get_pet_window(app)?
+        .emit("pet-skin-changed", skin_id)
+        .map_err(|error| error.to_string())
+}
+
+fn skin_price(pet_id: &str, skin_id: &str) -> Option<u64> {
+    if pet_id != DEMO_PET_ID {
+        return None;
+    }
+
+    DEMO_SKINS
+        .iter()
+        .find_map(|(id, price)| (*id == skin_id).then_some(*price))
+}
+
+fn is_skin_unlocked(skins: &SkinState, pet_id: &str, skin_id: &str) -> bool {
+    skins
+        .unlocked_skins
+        .get(pet_id)
+        .is_some_and(|unlocked| unlocked.iter().any(|skin| skin == skin_id))
+}
+
 #[tauri::command]
 fn show_pet(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let window = get_pet_window(&app)?;
@@ -251,6 +325,8 @@ fn show_pet(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
 
     emit_activity_stats(&app, &snapshot.activity);
     emit_settings(&app, &snapshot.settings);
+    emit_skin_state(&app, &snapshot.skins);
+    set_pet_skin_event(&app, &snapshot.skins.active_skin_id)?;
     Ok(())
 }
 
@@ -348,6 +424,72 @@ fn set_activity_tracking_enabled(
 
     emit_activity_stats(&app, &snapshot.activity);
     Ok(snapshot.activity)
+}
+
+#[tauri::command]
+fn unlock_skin(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pet_id: String,
+    skin_id: String,
+) -> Result<PersistedState, String> {
+    let price = skin_price(&pet_id, &skin_id).ok_or_else(|| "unknown skin".to_string())?;
+    let snapshot = {
+        let app_state = state.inner();
+        let mut persisted = app_state.inner.lock().map_err(|error| error.to_string())?;
+        ensure_default_skin(&mut persisted);
+
+        if !is_skin_unlocked(&persisted.skins, &pet_id, &skin_id) {
+            if persisted.activity.points < price {
+                return Err("not enough points to unlock this skin".to_string());
+            }
+
+            persisted.activity.points -= price;
+            persisted
+                .skins
+                .unlocked_skins
+                .entry(pet_id)
+                .or_default()
+                .push(skin_id.clone());
+        }
+
+        persisted.skins.active_skin_id = skin_id;
+        let snapshot = persisted.clone();
+        save_persisted_state(app_state, &snapshot)?;
+        snapshot
+    };
+
+    emit_activity_stats(&app, &snapshot.activity);
+    emit_skin_state(&app, &snapshot.skins);
+    set_pet_skin_event(&app, &snapshot.skins.active_skin_id)?;
+    Ok(snapshot)
+}
+
+#[tauri::command]
+fn set_active_skin(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pet_id: String,
+    skin_id: String,
+) -> Result<SkinState, String> {
+    let snapshot = {
+        let app_state = state.inner();
+        let mut persisted = app_state.inner.lock().map_err(|error| error.to_string())?;
+        ensure_default_skin(&mut persisted);
+
+        if !is_skin_unlocked(&persisted.skins, &pet_id, &skin_id) {
+            return Err("skin is locked".to_string());
+        }
+
+        persisted.skins.active_skin_id = skin_id;
+        let snapshot = persisted.clone();
+        save_persisted_state(app_state, &snapshot)?;
+        snapshot
+    };
+
+    emit_skin_state(&app, &snapshot.skins);
+    set_pet_skin_event(&app, &snapshot.skins.active_skin_id)?;
+    Ok(snapshot.skins)
 }
 
 fn create_pet_window(app: &tauri::App) -> tauri::Result<()> {
@@ -529,7 +671,9 @@ pub fn run() {
             set_pet_opacity,
             get_activity_stats,
             get_app_state,
-            set_activity_tracking_enabled
+            set_activity_tracking_enabled,
+            unlock_skin,
+            set_active_skin
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

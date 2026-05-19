@@ -22,9 +22,15 @@ type PetSettings = {
 	opacity: number;
 };
 
+type SkinState = {
+	active_skin_id: string;
+	unlocked_skins: Record<string, string[]>;
+};
+
 type PersistedState = {
 	activity: ActivityStats;
 	settings: PetSettings;
+	skins: SkinState;
 };
 
 type ActivityEventPayload = {
@@ -48,6 +54,34 @@ const petActiveFrames = [
 	"/pets/demo/active-04.png",
 	"/pets/demo/active-05.png",
 ];
+
+const demoPetId = "demo";
+const demoSkins = [
+	{
+		id: "default",
+		name: "Original",
+		price: 0,
+		description: "Aspecto base de la mascota demo.",
+	},
+	{ id: "mint", name: "Menta", price: 25, description: "Tono frío y suave." },
+	{
+		id: "berry",
+		name: "Berry",
+		price: 50,
+		description: "Variante rosada más intensa.",
+	},
+	{
+		id: "night",
+		name: "Noche",
+		price: 100,
+		description: "Look oscuro para escritorios nocturnos.",
+	},
+];
+
+const initialSkinState: SkinState = {
+	active_skin_id: "default",
+	unlocked_skins: { [demoPetId]: ["default"] },
+};
 
 type ControlButtonProps = {
 	children: React.ReactNode;
@@ -83,11 +117,13 @@ function MainWindow() {
 	const [status, setStatus] = useState("Ready to test the pet overlay.");
 	const [activityStats, setActivityStats] =
 		useState<ActivityStats>(initialActivityStats);
+	const [skinState, setSkinState] = useState<SkinState>(initialSkinState);
 	const [lastActivity, setLastActivity] = useState<ActivityKind | null>(null);
 
 	useEffect(() => {
 		void invoke<PersistedState>("get_app_state").then((persisted) => {
 			setActivityStats(persisted.activity);
+			setSkinState(persisted.skins);
 			setPosition(persisted.settings.position);
 			setSize(persisted.settings.size);
 			setOpacity(persisted.settings.opacity);
@@ -105,6 +141,9 @@ function MainWindow() {
 				setOpacity(event.payload.opacity);
 			},
 		);
+		const unlistenSkinState = listen<SkinState>("skin-state-updated", (event) =>
+			setSkinState(event.payload),
+		);
 		const unlistenActivity = listen<ActivityEventPayload>(
 			"activity-detected",
 			(event) => {
@@ -120,6 +159,7 @@ function MainWindow() {
 		return () => {
 			void unlistenStats.then((unlisten) => unlisten());
 			void unlistenSettings.then((unlisten) => unlisten());
+			void unlistenSkinState.then((unlisten) => unlisten());
 			void unlistenActivity.then((unlisten) => unlisten());
 			void unlistenError.then((unlisten) => unlisten());
 		};
@@ -179,6 +219,32 @@ function MainWindow() {
 			setStatus(
 				enabled ? "Activity tracking enabled." : "Activity tracking paused.",
 			);
+		});
+	}
+
+	function isSkinUnlocked(skinId: string) {
+		return skinState.unlocked_skins[demoPetId]?.includes(skinId) ?? false;
+	}
+
+	async function unlockOrUseSkin(skin: (typeof demoSkins)[number]) {
+		await runSafely(async () => {
+			if (isSkinUnlocked(skin.id)) {
+				const skins = await invoke<SkinState>("set_active_skin", {
+					petId: demoPetId,
+					skinId: skin.id,
+				});
+				setSkinState(skins);
+				setStatus(`${skin.name} skin applied.`);
+				return;
+			}
+
+			const persisted = await invoke<PersistedState>("unlock_skin", {
+				petId: demoPetId,
+				skinId: skin.id,
+			});
+			setActivityStats(persisted.activity);
+			setSkinState(persisted.skins);
+			setStatus(`${skin.name} skin unlocked and applied.`);
 		});
 	}
 
@@ -298,6 +364,53 @@ function MainWindow() {
 				</div>
 			</section>
 
+			<section className="skins-card">
+				<div className="section-heading">
+					<p className="eyebrow">Skins</p>
+					<h2>Tienda local de skins</h2>
+					<p>
+						Las skins son de la mascota demo y se desbloquean con puntos
+						locales.
+					</p>
+				</div>
+				<div className="skins-grid">
+					{demoSkins.map((skin) => {
+						const unlocked = isSkinUnlocked(skin.id);
+						const active = skinState.active_skin_id === skin.id;
+						const affordable = activityStats.points >= skin.price;
+
+						return (
+							<article className={`skin-card skin-${skin.id}`} key={skin.id}>
+								<div className="skin-preview">
+									<img src={petIdleFrame} alt={`${skin.name} skin preview`} />
+								</div>
+								<div>
+									<h3>{skin.name}</h3>
+									<p>{skin.description}</p>
+									<span>
+										{unlocked ? "Desbloqueada" : `${skin.price} puntos`}
+									</span>
+								</div>
+								<button
+									className={active ? "active" : undefined}
+									disabled={active || (!unlocked && !affordable)}
+									type="button"
+									onClick={() => unlockOrUseSkin(skin)}
+								>
+									{active
+										? "En uso"
+										: unlocked
+											? "Usar"
+											: affordable
+												? "Desbloquear"
+												: "Faltan puntos"}
+								</button>
+							</article>
+						);
+					})}
+				</div>
+			</section>
+
 			<section className="privacy-card">
 				<div>
 					<h2>Privacidad de la PoC</h2>
@@ -330,10 +443,12 @@ function DemoPet({
 	opacity,
 	size,
 	active,
+	skinId,
 }: {
 	opacity: number;
 	size: PetSize;
 	active: boolean;
+	skinId: string;
 }) {
 	const [frameIndex, setFrameIndex] = useState(0);
 
@@ -354,7 +469,7 @@ function DemoPet({
 
 	return (
 		<div
-			className={`pet-stage image-pet ${size} ${active ? "is-active" : ""}`}
+			className={`pet-stage image-pet ${size} skin-${skinId} ${active ? "is-active" : ""}`}
 			style={{ opacity }}
 		>
 			<img src={frame} alt="Demo desktop pet" draggable={false} />
@@ -370,6 +485,7 @@ function PetOverlay() {
 
 	const [opacity, setOpacity] = useState(1);
 	const [size, setSize] = useState<PetSize>("medium");
+	const [skinId, setSkinId] = useState("default");
 	const [active, setActive] = useState(false);
 	const activeTimeout = useRef<number | null>(null);
 
@@ -377,6 +493,7 @@ function PetOverlay() {
 		void invoke<PersistedState>("get_app_state").then((persisted) => {
 			setOpacity(persisted.settings.opacity);
 			setSize(persisted.settings.size);
+			setSkinId(persisted.skins.active_skin_id);
 		});
 
 		const unlistenOpacity = listen<number>("pet-opacity-changed", (event) => {
@@ -384,6 +501,9 @@ function PetOverlay() {
 		});
 		const unlistenSize = listen<PetSize>("pet-size-changed", (event) => {
 			setSize(event.payload);
+		});
+		const unlistenSkin = listen<string>("pet-skin-changed", (event) => {
+			setSkinId(event.payload);
 		});
 		const unlistenActivity = listen<ActivityEventPayload>(
 			"activity-detected",
@@ -402,13 +522,14 @@ function PetOverlay() {
 			}
 			void unlistenOpacity.then((unlisten) => unlisten());
 			void unlistenSize.then((unlisten) => unlisten());
+			void unlistenSkin.then((unlisten) => unlisten());
 			void unlistenActivity.then((unlisten) => unlisten());
 		};
 	}, []);
 
 	return (
 		<main className="overlay-shell">
-			<DemoPet opacity={opacity} size={size} active={active} />
+			<DemoPet opacity={opacity} size={size} active={active} skinId={skinId} />
 		</main>
 	);
 }
