@@ -78,6 +78,14 @@ const initialActivityStats: ActivityStats = {
 };
 
 const demoPetId = "demo";
+const petIdCollisionPrefix = "PET_ID_COLLISION:";
+
+function getCollidingPetId(error: unknown) {
+	const message = String(error);
+	return message.startsWith(petIdCollisionPrefix)
+		? message.slice(petIdCollisionPrefix.length)
+		: null;
+}
 
 const defaultPetCatalog: PetManifest[] = [
 	{
@@ -256,6 +264,7 @@ function MainWindow() {
 	const [petCatalog, setPetCatalog] =
 		useState<PetManifest[]>(defaultPetCatalog);
 	const [importPath, setImportPath] = useState("");
+	const [petpackPath, setPetpackPath] = useState("");
 	const [position, setPosition] = useState<PetPosition>("bottom-right");
 	const [size, setSize] = useState<PetSize>("medium");
 	const [opacity, setOpacity] = useState(1);
@@ -413,7 +422,7 @@ function MainWindow() {
 		});
 	}
 
-	async function importPetFolder() {
+	async function importPetFolder(overwriteExisting = false) {
 		setImportFeedback(null);
 
 		try {
@@ -423,15 +432,34 @@ function MainWindow() {
 
 			const persisted = await invoke<PersistedState>("import_pet_from_folder", {
 				folderPath: importPath,
+				overwriteExisting,
 			});
 			setPetLibrary(persisted.pets);
 			await refreshPetCatalog();
 			setStatus("Pet imported successfully.");
 			setImportFeedback({
 				kind: "success",
-				message: "Mascota importada correctamente.",
+				message: overwriteExisting
+					? "Mascota reemplazada correctamente."
+					: "Mascota importada correctamente.",
 			});
 		} catch (error) {
+			const collidingPetId = getCollidingPetId(error);
+			if (collidingPetId) {
+				const shouldReplace = window.confirm(
+					`La mascota "${collidingPetId}" ya está instalada. ¿Querés reemplazarla?`,
+				);
+				if (shouldReplace) {
+					await importPetFolder(true);
+					return;
+				}
+				setImportFeedback({
+					kind: "error",
+					message: "Importación cancelada: la mascota ya estaba instalada.",
+				});
+				return;
+			}
+
 			const message = String(error);
 			setStatus(`Command failed: ${message}`);
 			setImportFeedback({
@@ -452,6 +480,68 @@ function MainWindow() {
 		if (typeof selected === "string") {
 			setImportPath(selected);
 			setStatus("Pet folder selected.");
+		}
+	}
+
+	async function importPetpackFile(overwriteExisting = false) {
+		setImportFeedback(null);
+
+		try {
+			if (!petpackPath.trim()) {
+				throw new Error("select a .petpack or .zip file first");
+			}
+
+			const persisted = await invoke<PersistedState>("import_petpack_file", {
+				filePath: petpackPath,
+				overwriteExisting,
+			});
+			setPetLibrary(persisted.pets);
+			await refreshPetCatalog();
+			setStatus("Petpack imported successfully.");
+			setImportFeedback({
+				kind: "success",
+				message: overwriteExisting
+					? "Petpack reemplazado correctamente."
+					: "Petpack importado correctamente.",
+			});
+		} catch (error) {
+			const collidingPetId = getCollidingPetId(error);
+			if (collidingPetId) {
+				const shouldReplace = window.confirm(
+					`La mascota "${collidingPetId}" ya está instalada. ¿Querés reemplazarla?`,
+				);
+				if (shouldReplace) {
+					await importPetpackFile(true);
+					return;
+				}
+				setImportFeedback({
+					kind: "error",
+					message: "Importación cancelada: la mascota ya estaba instalada.",
+				});
+				return;
+			}
+
+			const message = String(error);
+			setStatus(`Command failed: ${message}`);
+			setImportFeedback({
+				kind: "error",
+				message: `No se pudo importar el petpack: ${message}`,
+			});
+		}
+	}
+
+	async function pickPetpackFile() {
+		setImportFeedback(null);
+		const selected = await open({
+			directory: false,
+			multiple: false,
+			title: "Seleccioná un .petpack o .zip",
+			filters: [{ name: "Petpack", extensions: ["petpack", "zip"] }],
+		});
+
+		if (typeof selected === "string") {
+			setPetpackPath(selected);
+			setStatus("Petpack file selected.");
 		}
 	}
 
@@ -510,26 +600,49 @@ function MainWindow() {
 				<div className="import-card">
 					<div>
 						<p className="eyebrow">Importar</p>
-						<h2>Instalar desde carpeta local</h2>
+						<h2>Instalar desde carpeta o petpack</h2>
 						<p>
-							Pegá la ruta de una carpeta que contenga `manifest.json` y sus
-							assets. La app la copiará al almacenamiento local y actualizará la
-							biblioteca.
+							Podés importar una carpeta con `manifest.json` o un archivo
+							`.petpack` / `.zip` para instalarlo en el almacenamiento local.
 						</p>
 					</div>
-					<div className="import-row">
-						<input
-							type="text"
-							value={importPath}
-							onChange={(event) => setImportPath(event.currentTarget.value)}
-							placeholder="C:\\mascotas\\mi-petpack"
-						/>
-						<button className="secondary" type="button" onClick={pickPetFolder}>
-							Elegir carpeta
-						</button>
-						<button type="button" onClick={importPetFolder}>
-							Importar mascota
-						</button>
+					<div className="import-group">
+						<div className="import-row">
+							<input
+								type="text"
+								value={importPath}
+								onChange={(event) => setImportPath(event.currentTarget.value)}
+								placeholder="C:\\mascotas\\mi-petpack"
+							/>
+							<button
+								className="secondary"
+								type="button"
+								onClick={pickPetFolder}
+							>
+								Elegir carpeta
+							</button>
+							<button type="button" onClick={() => importPetFolder()}>
+								Importar carpeta
+							</button>
+						</div>
+						<div className="import-row">
+							<input
+								type="text"
+								value={petpackPath}
+								onChange={(event) => setPetpackPath(event.currentTarget.value)}
+								placeholder="C:\\mascotas\\chimmy.petpack"
+							/>
+							<button
+								className="secondary"
+								type="button"
+								onClick={pickPetpackFile}
+							>
+								Elegir petpack
+							</button>
+							<button type="button" onClick={() => importPetpackFile()}>
+								Importar petpack
+							</button>
+						</div>
 					</div>
 					{importFeedback ? (
 						<p className={`import-feedback ${importFeedback.kind}`}>

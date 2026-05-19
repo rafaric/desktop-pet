@@ -2,10 +2,11 @@ use rdev::{listen, Event, EventType};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    fs,
+    fs, io,
     path::{Path, PathBuf},
     sync::Mutex,
     thread,
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{
     menu::{Menu, MenuItem, Submenu},
@@ -13,6 +14,7 @@ use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
 };
+use zip::ZipArchive;
 
 const PET_WINDOW_LABEL: &str = "pet-overlay";
 const DEFAULT_POSITION: &str = "bottom-right";
@@ -186,6 +188,76 @@ fn copy_dir_recursive(source: &Path, destination: &Path) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn temporary_import_dir(app_handle: &AppHandle) -> Result<PathBuf, String> {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_millis();
+    let temp_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("imports-temp")
+        .join(format!("pet-import-{millis}"));
+    fs::create_dir_all(&temp_dir).map_err(|error| error.to_string())?;
+    Ok(temp_dir)
+}
+
+fn extract_zip_to_dir(zip_path: &Path, destination: &Path) -> Result<(), String> {
+    let file = fs::File::open(zip_path).map_err(|error| error.to_string())?;
+    let mut archive = ZipArchive::new(file).map_err(|error| error.to_string())?;
+
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
+        let Some(relative_path) = entry.enclosed_name().map(|path| path.to_path_buf()) else {
+            return Err("petpack contains an unsafe path".to_string());
+        };
+
+        let output_path = destination.join(relative_path);
+        if entry.is_dir() {
+            fs::create_dir_all(&output_path).map_err(|error| error.to_string())?;
+            continue;
+        }
+
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+
+        let mut output_file = fs::File::create(&output_path).map_err(|error| error.to_string())?;
+        io::copy(&mut entry, &mut output_file).map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
+}
+
+fn collect_manifest_dirs(root: &Path, found: &mut Vec<PathBuf>) -> Result<(), String> {
+    let manifest_path = root.join("manifest.json");
+    if manifest_path.exists() {
+        found.push(root.to_path_buf());
+    }
+
+    for entry in fs::read_dir(root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_manifest_dirs(&path, found)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn find_manifest_dir(root: &Path) -> Result<PathBuf, String> {
+    let mut found = Vec::new();
+    collect_manifest_dirs(root, &mut found)?;
+
+    match found.len() {
+        0 => Err("manifest.json not found in extracted petpack".to_string()),
+        1 => Ok(found.remove(0)),
+        _ => Err("petpack must contain exactly one manifest.json".to_string()),
+    }
 }
 
 fn is_valid_pet_id(id: &str) -> bool {
@@ -653,13 +725,16 @@ fn get_installed_pet_catalog(app: AppHandle) -> Result<Vec<PetManifest>, String>
     list_installed_pet_manifests(&app)
 }
 
-#[tauri::command]
-fn import_pet_from_folder(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    folder_path: String,
+fn pet_id_collision_error(pet_id: &str) -> String {
+    format!("PET_ID_COLLISION:{pet_id}")
+}
+
+fn install_pet_from_directory(
+    app: &AppHandle,
+    app_state: &AppState,
+    source_dir: &Path,
+    overwrite_existing: bool,
 ) -> Result<PersistedState, String> {
-    let source_dir = PathBuf::from(folder_path);
     if !source_dir.is_dir() {
         return Err("selected path is not a directory".to_string());
     }
@@ -674,20 +749,45 @@ fn import_pet_from_folder(
         return Err("demo pet id is reserved".to_string());
     }
 
-    validate_manifest_assets(&source_dir, &manifest)?;
+    validate_manifest_assets(source_dir, &manifest)?;
 
-    let install_dir = pets_install_dir(&app)?.join(&manifest.id);
-    let pets_root = pets_install_dir(&app)?;
+    let pets_root = pets_install_dir(app)?;
+    let install_dir = pets_root.join(&manifest.id);
     if !install_dir.starts_with(&pets_root) {
         return Err("pet id resolves outside the install directory".to_string());
     }
-    if install_dir.exists() {
-        fs::remove_dir_all(&install_dir).map_err(|error| error.to_string())?;
+
+    let replacing_existing = install_dir.exists();
+    if replacing_existing && !overwrite_existing {
+        return Err(pet_id_collision_error(&manifest.id));
     }
-    copy_dir_recursive(&source_dir, &install_dir)?;
+
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_millis();
+    let staging_dir = pets_root.join(format!(".{}-staging-{millis}", manifest.id));
+    let backup_dir = pets_root.join(format!(".{}-backup-{millis}", manifest.id));
+
+    if staging_dir.exists() {
+        fs::remove_dir_all(&staging_dir).map_err(|error| error.to_string())?;
+    }
+    copy_dir_recursive(source_dir, &staging_dir)?;
+
+    if replacing_existing {
+        fs::rename(&install_dir, &backup_dir).map_err(|error| error.to_string())?;
+        if let Err(error) = fs::rename(&staging_dir, &install_dir) {
+            let _ = fs::rename(&backup_dir, &install_dir);
+            let _ = fs::remove_dir_all(&staging_dir);
+            return Err(error.to_string());
+        }
+        let _ = fs::remove_dir_all(&backup_dir);
+    } else if let Err(error) = fs::rename(&staging_dir, &install_dir) {
+        let _ = fs::remove_dir_all(&staging_dir);
+        return Err(error.to_string());
+    }
 
     let snapshot = {
-        let app_state = state.inner();
         let mut persisted = app_state.inner.lock().map_err(|error| error.to_string())?;
         ensure_demo_pet(&mut persisted);
         if !persisted
@@ -704,10 +804,43 @@ fn import_pet_from_folder(
         snapshot
     };
 
-    emit_pet_library_state(&app, &snapshot.pets);
-    emit_active_pet(&app, &snapshot.pets.active_pet_id);
-    emit_pet_catalog_changed(&app);
+    emit_pet_library_state(app, &snapshot.pets);
+    emit_active_pet(app, &snapshot.pets.active_pet_id);
+    emit_pet_catalog_changed(app);
     Ok(snapshot)
+}
+
+#[tauri::command]
+fn import_pet_from_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    folder_path: String,
+    overwrite_existing: bool,
+) -> Result<PersistedState, String> {
+    let source_dir = PathBuf::from(folder_path);
+    install_pet_from_directory(&app, state.inner(), &source_dir, overwrite_existing)
+}
+
+#[tauri::command]
+fn import_petpack_file(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    file_path: String,
+    overwrite_existing: bool,
+) -> Result<PersistedState, String> {
+    let source_file = PathBuf::from(file_path);
+    if !source_file.is_file() {
+        return Err("selected path is not a file".to_string());
+    }
+
+    let extraction_dir = temporary_import_dir(&app)?;
+    let result = (|| {
+        extract_zip_to_dir(&source_file, &extraction_dir)?;
+        let pet_dir = find_manifest_dir(&extraction_dir)?;
+        install_pet_from_directory(&app, state.inner(), &pet_dir, overwrite_existing)
+    })();
+    let _ = fs::remove_dir_all(&extraction_dir);
+    result
 }
 
 #[tauri::command]
@@ -990,6 +1123,7 @@ pub fn run() {
             get_installed_pet_catalog,
             set_activity_tracking_enabled,
             import_pet_from_folder,
+            import_petpack_file,
             set_active_pet,
             unlock_skin,
             set_active_skin
