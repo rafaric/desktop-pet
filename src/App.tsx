@@ -79,6 +79,9 @@ const initialActivityStats: ActivityStats = {
 
 const demoPetId = "demo";
 const petIdCollisionPrefix = "PET_ID_COLLISION:";
+const devImportsEnabled =
+	import.meta.env.DEV ||
+	import.meta.env.VITE_DESKTOP_PET_DEV_IMPORTS === "true";
 
 function getCollidingPetId(error: unknown) {
 	const message = String(error);
@@ -597,59 +600,63 @@ function MainWindow() {
 					</button>
 				</div>
 
-				<div className="import-card">
-					<div>
-						<p className="eyebrow">Importar</p>
-						<h2>Instalar desde carpeta o petpack</h2>
-						<p>
-							Podés importar una carpeta con `manifest.json` o un archivo
-							`.petpack` / `.zip` para instalarlo en el almacenamiento local.
-						</p>
-					</div>
-					<div className="import-group">
-						<div className="import-row">
-							<input
-								type="text"
-								value={importPath}
-								onChange={(event) => setImportPath(event.currentTarget.value)}
-								placeholder="C:\\mascotas\\mi-petpack"
-							/>
-							<button
-								className="secondary"
-								type="button"
-								onClick={pickPetFolder}
-							>
-								Elegir carpeta
-							</button>
-							<button type="button" onClick={() => importPetFolder()}>
-								Importar carpeta
-							</button>
+				{devImportsEnabled ? (
+					<div className="import-card">
+						<div>
+							<p className="eyebrow">Importar · desarrollo</p>
+							<h2>Instalar desde carpeta o petpack dev</h2>
+							<p>
+								Estos imports son sólo para desarrollo. En producción, la app
+								debe aceptar únicamente petpacks firmados/licenciados.
+							</p>
 						</div>
-						<div className="import-row">
-							<input
-								type="text"
-								value={petpackPath}
-								onChange={(event) => setPetpackPath(event.currentTarget.value)}
-								placeholder="C:\\mascotas\\chimmy.petpack"
-							/>
-							<button
-								className="secondary"
-								type="button"
-								onClick={pickPetpackFile}
-							>
-								Elegir petpack
-							</button>
-							<button type="button" onClick={() => importPetpackFile()}>
-								Importar petpack
-							</button>
+						<div className="import-group">
+							<div className="import-row">
+								<input
+									type="text"
+									value={importPath}
+									onChange={(event) => setImportPath(event.currentTarget.value)}
+									placeholder="C:\\mascotas\\mi-petpack"
+								/>
+								<button
+									className="secondary"
+									type="button"
+									onClick={pickPetFolder}
+								>
+									Elegir carpeta
+								</button>
+								<button type="button" onClick={() => importPetFolder()}>
+									Importar carpeta
+								</button>
+							</div>
+							<div className="import-row">
+								<input
+									type="text"
+									value={petpackPath}
+									onChange={(event) =>
+										setPetpackPath(event.currentTarget.value)
+									}
+									placeholder="C:\\mascotas\\chimmy.petpack"
+								/>
+								<button
+									className="secondary"
+									type="button"
+									onClick={pickPetpackFile}
+								>
+									Elegir petpack
+								</button>
+								<button type="button" onClick={() => importPetpackFile()}>
+									Importar petpack
+								</button>
+							</div>
 						</div>
+						{importFeedback ? (
+							<p className={`import-feedback ${importFeedback.kind}`}>
+								{importFeedback.message}
+							</p>
+						) : null}
 					</div>
-					{importFeedback ? (
-						<p className={`import-feedback ${importFeedback.kind}`}>
-							{importFeedback.message}
-						</p>
-					) : null}
-				</div>
+				) : null}
 			</section>
 
 			<section className="pet-library-card">

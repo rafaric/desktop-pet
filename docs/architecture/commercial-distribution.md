@@ -109,13 +109,14 @@ Recommended policy:
 
 The Rust backend must enforce this boundary. Hiding the UI is not enough because Tauri commands can be invoked directly if exposed.
 
-Suggested flag:
+Suggested build flags:
 
 ```text
-DESKTOP_PET_DEV_IMPORTS=true
+DESKTOP_PET_DEV_IMPORTS=true       # Rust/backend compile-time gate
+VITE_DESKTOP_PET_DEV_IMPORTS=true  # Vite/frontend visibility gate
 ```
 
-Production builds should default this to false.
+Production builds should default both to false. The backend flag is the security boundary; the frontend flag only controls whether the development import UI is visible.
 
 ## Store API shape
 

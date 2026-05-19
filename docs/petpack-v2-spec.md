@@ -237,4 +237,4 @@ Commercial v2 petpacks add:
 - account-bound validation;
 - asset hash verification.
 
-Production should eventually reject unsigned v1/dev petpacks unless a dev-import flag is explicitly enabled.
+Production should eventually reject unsigned v1/dev petpacks unless the backend is explicitly compiled with `DESKTOP_PET_DEV_IMPORTS=true`. The matching frontend visibility flag is `VITE_DESKTOP_PET_DEV_IMPORTS=true`, but that flag is not a security boundary.

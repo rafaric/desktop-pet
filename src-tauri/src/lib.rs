@@ -729,6 +729,18 @@ fn pet_id_collision_error(pet_id: &str) -> String {
     format!("PET_ID_COLLISION:{pet_id}")
 }
 
+fn dev_imports_enabled() -> bool {
+    cfg!(debug_assertions) || option_env!("DESKTOP_PET_DEV_IMPORTS") == Some("true")
+}
+
+fn ensure_dev_imports_enabled() -> Result<(), String> {
+    if dev_imports_enabled() {
+        Ok(())
+    } else {
+        Err("dev imports are disabled in this build".to_string())
+    }
+}
+
 fn install_pet_from_directory(
     app: &AppHandle,
     app_state: &AppState,
@@ -817,6 +829,7 @@ fn import_pet_from_folder(
     folder_path: String,
     overwrite_existing: bool,
 ) -> Result<PersistedState, String> {
+    ensure_dev_imports_enabled()?;
     let source_dir = PathBuf::from(folder_path);
     install_pet_from_directory(&app, state.inner(), &source_dir, overwrite_existing)
 }
@@ -828,6 +841,7 @@ fn import_petpack_file(
     file_path: String,
     overwrite_existing: bool,
 ) -> Result<PersistedState, String> {
+    ensure_dev_imports_enabled()?;
     let source_file = PathBuf::from(file_path);
     if !source_file.is_file() {
         return Err("selected path is not a file".to_string());
