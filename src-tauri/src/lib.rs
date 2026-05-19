@@ -1,6 +1,6 @@
 use rdev::{listen, Event, EventType};
-use serde::Serialize;
-use std::{sync::Mutex, thread};
+use serde::{Deserialize, Serialize};
+use std::{fs, path::PathBuf, sync::Mutex, thread};
 use tauri::{
     menu::{Menu, MenuItem, Submenu},
     tray::TrayIconBuilder,
@@ -11,8 +11,10 @@ use tauri::{
 const PET_WINDOW_LABEL: &str = "pet-overlay";
 const DEFAULT_POSITION: &str = "bottom-right";
 const DEFAULT_SIZE: &str = "medium";
+const DEFAULT_OPACITY: f64 = 1.0;
+const STORE_FILE_NAME: &str = "desktop-pet-state.json";
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct ActivitySnapshot {
     points: u64,
     mouse_clicks: u64,
@@ -33,15 +35,38 @@ impl Default for ActivitySnapshot {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+struct PetSettings {
+    position: String,
+    size: String,
+    opacity: f64,
+}
+
+impl Default for PetSettings {
+    fn default() -> Self {
+        Self {
+            position: DEFAULT_POSITION.to_string(),
+            size: DEFAULT_SIZE.to_string(),
+            opacity: DEFAULT_OPACITY,
+        }
+    }
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+struct PersistedState {
+    activity: ActivitySnapshot,
+    settings: PetSettings,
+}
+
 #[derive(Clone, Serialize)]
 struct ActivityEventPayload {
     activity_kind: &'static str,
     stats: ActivitySnapshot,
 }
 
-#[derive(Default)]
-struct ActivityState {
-    inner: Mutex<ActivitySnapshot>,
+struct AppState {
+    inner: Mutex<PersistedState>,
+    store_path: PathBuf,
 }
 
 fn pet_size(size: &str) -> u32 {
@@ -52,43 +77,76 @@ fn pet_size(size: &str) -> u32 {
     }
 }
 
+fn app_state_path(app: &tauri::App) -> Result<PathBuf, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
+    fs::create_dir_all(&app_data_dir).map_err(|error| error.to_string())?;
+    Ok(app_data_dir.join(STORE_FILE_NAME))
+}
+
+fn load_persisted_state(path: &PathBuf) -> PersistedState {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<PersistedState>(&content).ok())
+        .unwrap_or_default()
+}
+
+fn save_persisted_state(state: &AppState, snapshot: &PersistedState) -> Result<(), String> {
+    let content = serde_json::to_string_pretty(snapshot).map_err(|error| error.to_string())?;
+    fs::write(&state.store_path, content).map_err(|error| error.to_string())
+}
+
 fn get_pet_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     app.get_webview_window(PET_WINDOW_LABEL)
         .ok_or_else(|| "pet overlay window is not available".to_string())
-}
-
-fn set_pet_active(state: &State<'_, ActivityState>, pet_active: bool) -> Result<ActivitySnapshot, String> {
-    let mut stats = state.inner.lock().map_err(|error| error.to_string())?;
-    stats.pet_active = pet_active;
-    Ok(stats.clone())
 }
 
 fn emit_activity_stats(app: &AppHandle, stats: &ActivitySnapshot) {
     let _ = app.emit("activity-stats-updated", stats);
 }
 
+fn emit_settings(app: &AppHandle, settings: &PetSettings) {
+    let _ = app.emit("pet-settings-updated", settings);
+}
+
+fn update_persisted_state<F>(app_state: &AppState, update: F) -> Result<PersistedState, String>
+where
+    F: FnOnce(&mut PersistedState),
+{
+    let mut state = app_state.inner.lock().map_err(|error| error.to_string())?;
+    update(&mut state);
+    let snapshot = state.clone();
+    save_persisted_state(app_state, &snapshot)?;
+    Ok(snapshot)
+}
+
 fn record_activity(
     app: &AppHandle,
-    state: &ActivityState,
+    app_state: &AppState,
     activity_kind: &'static str,
 ) -> Result<(), String> {
     let payload = {
-        let mut stats = state.inner.lock().map_err(|error| error.to_string())?;
+        let mut state = app_state.inner.lock().map_err(|error| error.to_string())?;
 
-        if !stats.tracking_enabled || !stats.pet_active {
+        if !state.activity.tracking_enabled || !state.activity.pet_active {
             return Ok(());
         }
 
-        stats.points += 1;
+        state.activity.points += 1;
         match activity_kind {
-            "mouse" => stats.mouse_clicks += 1,
-            "keyboard" => stats.key_presses += 1,
+            "mouse" => state.activity.mouse_clicks += 1,
+            "keyboard" => state.activity.key_presses += 1,
             _ => {}
         }
 
+        let snapshot = state.clone();
+        save_persisted_state(app_state, &snapshot)?;
+
         ActivityEventPayload {
             activity_kind,
-            stats: stats.clone(),
+            stats: snapshot.activity,
         }
     };
 
@@ -103,11 +161,11 @@ fn start_activity_listener(app: AppHandle) {
     thread::spawn(move || {
         let callback = move |event: Event| match event.event_type {
             EventType::ButtonPress(_) => {
-                let state = listener_app.state::<ActivityState>();
+                let state = listener_app.state::<AppState>();
                 let _ = record_activity(&listener_app, state.inner(), "mouse");
             }
             EventType::KeyPress(_) => {
-                let state = listener_app.state::<ActivityState>();
+                let state = listener_app.state::<AppState>();
                 let _ = record_activity(&listener_app, state.inner(), "keyboard");
             }
             _ => {}
@@ -166,79 +224,130 @@ fn resize_pet(app: &AppHandle, size: &str) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-fn show_pet(app: AppHandle, state: State<'_, ActivityState>) -> Result<(), String> {
-    let window = get_pet_window(&app)?;
-    resize_pet(&app, DEFAULT_SIZE)?;
-    move_pet_to_position(&app, DEFAULT_POSITION, pet_size(DEFAULT_SIZE))?;
-    window.show().map_err(|error| error.to_string())?;
-    window
-        .set_always_on_top(true)
-        .map_err(|error| error.to_string())?;
-
-    let stats = set_pet_active(&state, true)?;
-    emit_activity_stats(&app, &stats);
-    Ok(())
+fn apply_pet_settings(app: &AppHandle, settings: &PetSettings) -> Result<(), String> {
+    resize_pet(app, &settings.size)?;
+    move_pet_to_position(app, &settings.position, pet_size(&settings.size))?;
+    set_pet_opacity_event(app, settings.opacity)
 }
 
-#[tauri::command]
-fn hide_pet(app: AppHandle, state: State<'_, ActivityState>) -> Result<(), String> {
-    get_pet_window(&app)?
-        .hide()
-        .map_err(|error| error.to_string())?;
-
-    let stats = set_pet_active(&state, false)?;
-    emit_activity_stats(&app, &stats);
-    Ok(())
-}
-
-#[tauri::command]
-fn set_pet_position(app: AppHandle, position: String) -> Result<(), String> {
-    let window = get_pet_window(&app)?;
-    let size = window
-        .inner_size()
-        .map_err(|error| error.to_string())?
-        .width;
-    move_pet_to_position(&app, &position, size)
-}
-
-#[tauri::command]
-fn set_pet_size(app: AppHandle, size: String) -> Result<(), String> {
-    let pixels = pet_size(&size);
-    resize_pet(&app, &size)?;
-    move_pet_to_position(&app, DEFAULT_POSITION, pixels)
-}
-
-#[tauri::command]
-fn set_pet_opacity(app: AppHandle, opacity: f64) -> Result<(), String> {
-    get_pet_window(&app)?
+fn set_pet_opacity_event(app: &AppHandle, opacity: f64) -> Result<(), String> {
+    get_pet_window(app)?
         .emit("pet-opacity-changed", opacity)
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn get_activity_stats(state: State<'_, ActivityState>) -> Result<ActivitySnapshot, String> {
+fn show_pet(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let window = get_pet_window(&app)?;
+    let snapshot = update_persisted_state(state.inner(), |persisted| {
+        persisted.activity.pet_active = true;
+    })?;
+
+    apply_pet_settings(&app, &snapshot.settings)?;
+    window.show().map_err(|error| error.to_string())?;
+    window
+        .set_always_on_top(true)
+        .map_err(|error| error.to_string())?;
+
+    emit_activity_stats(&app, &snapshot.activity);
+    emit_settings(&app, &snapshot.settings);
+    Ok(())
+}
+
+#[tauri::command]
+fn hide_pet(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    get_pet_window(&app)?
+        .hide()
+        .map_err(|error| error.to_string())?;
+
+    let snapshot = update_persisted_state(state.inner(), |persisted| {
+        persisted.activity.pet_active = false;
+    })?;
+    emit_activity_stats(&app, &snapshot.activity);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_pet_position(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    position: String,
+) -> Result<PetSettings, String> {
+    let snapshot = update_persisted_state(state.inner(), |persisted| {
+        persisted.settings.position = position;
+    })?;
+    move_pet_to_position(
+        &app,
+        &snapshot.settings.position,
+        pet_size(&snapshot.settings.size),
+    )?;
+    emit_settings(&app, &snapshot.settings);
+    Ok(snapshot.settings)
+}
+
+#[tauri::command]
+fn set_pet_size(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    size: String,
+) -> Result<PetSettings, String> {
+    let snapshot = update_persisted_state(state.inner(), |persisted| {
+        persisted.settings.size = size;
+    })?;
+    resize_pet(&app, &snapshot.settings.size)?;
+    move_pet_to_position(
+        &app,
+        &snapshot.settings.position,
+        pet_size(&snapshot.settings.size),
+    )?;
+    emit_settings(&app, &snapshot.settings);
+    Ok(snapshot.settings)
+}
+
+#[tauri::command]
+fn set_pet_opacity(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    opacity: f64,
+) -> Result<PetSettings, String> {
+    let snapshot = update_persisted_state(state.inner(), |persisted| {
+        persisted.settings.opacity = opacity;
+    })?;
+    set_pet_opacity_event(&app, snapshot.settings.opacity)?;
+    emit_settings(&app, &snapshot.settings);
+    Ok(snapshot.settings)
+}
+
+#[tauri::command]
+fn get_activity_stats(state: State<'_, AppState>) -> Result<ActivitySnapshot, String> {
     state
         .inner
         .lock()
-        .map(|stats| stats.clone())
+        .map(|state| state.activity.clone())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_app_state(state: State<'_, AppState>) -> Result<PersistedState, String> {
+    state
+        .inner
+        .lock()
+        .map(|state| state.clone())
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn set_activity_tracking_enabled(
     app: AppHandle,
-    state: State<'_, ActivityState>,
+    state: State<'_, AppState>,
     enabled: bool,
 ) -> Result<ActivitySnapshot, String> {
-    let snapshot = {
-        let mut stats = state.inner.lock().map_err(|error| error.to_string())?;
-        stats.tracking_enabled = enabled;
-        stats.clone()
-    };
+    let snapshot = update_persisted_state(state.inner(), |persisted| {
+        persisted.activity.tracking_enabled = enabled;
+    })?;
 
-    emit_activity_stats(&app, &snapshot);
-    Ok(snapshot)
+    emit_activity_stats(&app, &snapshot.activity);
+    Ok(snapshot.activity)
 }
 
 fn create_pet_window(app: &tauri::App) -> tauri::Result<()> {
@@ -320,44 +429,64 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
                 }
             }
             "show_pet" => {
-                if let Some(state) = app.try_state::<ActivityState>() {
+                if let Some(state) = app.try_state::<AppState>() {
                     let _ = show_pet(app.clone(), state);
                 }
             }
             "hide_pet" => {
-                if let Some(state) = app.try_state::<ActivityState>() {
+                if let Some(state) = app.try_state::<AppState>() {
                     let _ = hide_pet(app.clone(), state);
                 }
             }
             "position_top_left" => {
-                let _ = set_pet_position(app.clone(), "top-left".to_string());
+                if let Some(state) = app.try_state::<AppState>() {
+                    let _ = set_pet_position(app.clone(), state, "top-left".to_string());
+                }
             }
             "position_top_right" => {
-                let _ = set_pet_position(app.clone(), "top-right".to_string());
+                if let Some(state) = app.try_state::<AppState>() {
+                    let _ = set_pet_position(app.clone(), state, "top-right".to_string());
+                }
             }
             "position_bottom_left" => {
-                let _ = set_pet_position(app.clone(), "bottom-left".to_string());
+                if let Some(state) = app.try_state::<AppState>() {
+                    let _ = set_pet_position(app.clone(), state, "bottom-left".to_string());
+                }
             }
             "position_bottom_right" => {
-                let _ = set_pet_position(app.clone(), "bottom-right".to_string());
+                if let Some(state) = app.try_state::<AppState>() {
+                    let _ = set_pet_position(app.clone(), state, "bottom-right".to_string());
+                }
             }
             "size_small" => {
-                let _ = set_pet_size(app.clone(), "small".to_string());
+                if let Some(state) = app.try_state::<AppState>() {
+                    let _ = set_pet_size(app.clone(), state, "small".to_string());
+                }
             }
             "size_medium" => {
-                let _ = set_pet_size(app.clone(), "medium".to_string());
+                if let Some(state) = app.try_state::<AppState>() {
+                    let _ = set_pet_size(app.clone(), state, "medium".to_string());
+                }
             }
             "size_large" => {
-                let _ = set_pet_size(app.clone(), "large".to_string());
+                if let Some(state) = app.try_state::<AppState>() {
+                    let _ = set_pet_size(app.clone(), state, "large".to_string());
+                }
             }
             "opacity_100" => {
-                let _ = set_pet_opacity(app.clone(), 1.0);
+                if let Some(state) = app.try_state::<AppState>() {
+                    let _ = set_pet_opacity(app.clone(), state, 1.0);
+                }
             }
             "opacity_75" => {
-                let _ = set_pet_opacity(app.clone(), 0.75);
+                if let Some(state) = app.try_state::<AppState>() {
+                    let _ = set_pet_opacity(app.clone(), state, 0.75);
+                }
             }
             "opacity_50" => {
-                let _ = set_pet_opacity(app.clone(), 0.5);
+                if let Some(state) = app.try_state::<AppState>() {
+                    let _ = set_pet_opacity(app.clone(), state, 0.5);
+                }
             }
             "quit" => app.exit(0),
             _ => {}
@@ -370,11 +499,25 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(ActivityState::default())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            let store_path = app_state_path(app)
+                .map_err(|error| tauri::Error::Io(std::io::Error::other(error)))?;
+            let persisted = load_persisted_state(&store_path);
+            app.manage(AppState {
+                inner: Mutex::new(persisted.clone()),
+                store_path,
+            });
+
             create_pet_window(app)?;
             create_tray(app)?;
+
+            if persisted.activity.pet_active {
+                let handle = app.handle().clone();
+                apply_pet_settings(&handle, &persisted.settings)?;
+                get_pet_window(&handle)?.show()?;
+            }
+
             start_activity_listener(app.handle().clone());
             Ok(())
         })
@@ -385,6 +528,7 @@ pub fn run() {
             set_pet_size,
             set_pet_opacity,
             get_activity_stats,
+            get_app_state,
             set_activity_tracking_enabled
         ])
         .run(tauri::generate_context!())

@@ -16,6 +16,17 @@ type ActivityStats = {
 	pet_active: boolean;
 };
 
+type PetSettings = {
+	position: PetPosition;
+	size: PetSize;
+	opacity: number;
+};
+
+type PersistedState = {
+	activity: ActivityStats;
+	settings: PetSettings;
+};
+
 type ActivityEventPayload = {
 	activity_kind: ActivityKind;
 	stats: ActivityStats;
@@ -75,11 +86,24 @@ function MainWindow() {
 	const [lastActivity, setLastActivity] = useState<ActivityKind | null>(null);
 
 	useEffect(() => {
-		void invoke<ActivityStats>("get_activity_stats").then(setActivityStats);
+		void invoke<PersistedState>("get_app_state").then((persisted) => {
+			setActivityStats(persisted.activity);
+			setPosition(persisted.settings.position);
+			setSize(persisted.settings.size);
+			setOpacity(persisted.settings.opacity);
+		});
 
 		const unlistenStats = listen<ActivityStats>(
 			"activity-stats-updated",
 			(event) => setActivityStats(event.payload),
+		);
+		const unlistenSettings = listen<PetSettings>(
+			"pet-settings-updated",
+			(event) => {
+				setPosition(event.payload.position);
+				setSize(event.payload.size);
+				setOpacity(event.payload.opacity);
+			},
 		);
 		const unlistenActivity = listen<ActivityEventPayload>(
 			"activity-detected",
@@ -95,6 +119,7 @@ function MainWindow() {
 
 		return () => {
 			void unlistenStats.then((unlisten) => unlisten());
+			void unlistenSettings.then((unlisten) => unlisten());
 			void unlistenActivity.then((unlisten) => unlisten());
 			void unlistenError.then((unlisten) => unlisten());
 		};
@@ -349,6 +374,11 @@ function PetOverlay() {
 	const activeTimeout = useRef<number | null>(null);
 
 	useEffect(() => {
+		void invoke<PersistedState>("get_app_state").then((persisted) => {
+			setOpacity(persisted.settings.opacity);
+			setSize(persisted.settings.size);
+		});
+
 		const unlistenOpacity = listen<number>("pet-opacity-changed", (event) => {
 			setOpacity(event.payload);
 		});
