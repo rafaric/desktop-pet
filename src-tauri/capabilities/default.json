@@ -5,6 +5,7 @@
   "windows": ["main", "pet-overlay"],
   "permissions": [
     "core:default",
+    "dialog:default",
     "opener:default"
   ]
 }

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
@@ -440,6 +441,20 @@ function MainWindow() {
 		}
 	}
 
+	async function pickPetFolder() {
+		setImportFeedback(null);
+		const selected = await open({
+			directory: true,
+			multiple: false,
+			title: "Seleccioná una carpeta de mascota",
+		});
+
+		if (typeof selected === "string") {
+			setImportPath(selected);
+			setStatus("Pet folder selected.");
+		}
+	}
+
 	async function unlockOrUseSkin(skin: PetSkinCatalogItem) {
 		await runSafely(async () => {
 			if (!activePetSupportsSkins) {
@@ -509,6 +524,9 @@ function MainWindow() {
 							onChange={(event) => setImportPath(event.currentTarget.value)}
 							placeholder="C:\\mascotas\\mi-petpack"
 						/>
+						<button className="secondary" type="button" onClick={pickPetFolder}>
+							Elegir carpeta
+						</button>
 						<button type="button" onClick={importPetFolder}>
 							Importar mascota
 						</button>
