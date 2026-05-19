@@ -1,13 +1,48 @@
+use rdev::{listen, Event, EventType};
+use serde::Serialize;
+use std::{sync::Mutex, thread};
 use tauri::{
     menu::{Menu, MenuItem, Submenu},
     tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow,
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
 };
 
 const PET_WINDOW_LABEL: &str = "pet-overlay";
 const DEFAULT_POSITION: &str = "bottom-right";
 const DEFAULT_SIZE: &str = "medium";
+
+#[derive(Clone, Serialize)]
+struct ActivitySnapshot {
+    points: u64,
+    mouse_clicks: u64,
+    key_presses: u64,
+    tracking_enabled: bool,
+    pet_active: bool,
+}
+
+impl Default for ActivitySnapshot {
+    fn default() -> Self {
+        Self {
+            points: 0,
+            mouse_clicks: 0,
+            key_presses: 0,
+            tracking_enabled: true,
+            pet_active: false,
+        }
+    }
+}
+
+#[derive(Clone, Serialize)]
+struct ActivityEventPayload {
+    activity_kind: &'static str,
+    stats: ActivitySnapshot,
+}
+
+#[derive(Default)]
+struct ActivityState {
+    inner: Mutex<ActivitySnapshot>,
+}
 
 fn pet_size(size: &str) -> u32 {
     match size {
@@ -20,6 +55,68 @@ fn pet_size(size: &str) -> u32 {
 fn get_pet_window(app: &AppHandle) -> Result<WebviewWindow, String> {
     app.get_webview_window(PET_WINDOW_LABEL)
         .ok_or_else(|| "pet overlay window is not available".to_string())
+}
+
+fn set_pet_active(state: &State<'_, ActivityState>, pet_active: bool) -> Result<ActivitySnapshot, String> {
+    let mut stats = state.inner.lock().map_err(|error| error.to_string())?;
+    stats.pet_active = pet_active;
+    Ok(stats.clone())
+}
+
+fn emit_activity_stats(app: &AppHandle, stats: &ActivitySnapshot) {
+    let _ = app.emit("activity-stats-updated", stats);
+}
+
+fn record_activity(
+    app: &AppHandle,
+    state: &ActivityState,
+    activity_kind: &'static str,
+) -> Result<(), String> {
+    let payload = {
+        let mut stats = state.inner.lock().map_err(|error| error.to_string())?;
+
+        if !stats.tracking_enabled || !stats.pet_active {
+            return Ok(());
+        }
+
+        stats.points += 1;
+        match activity_kind {
+            "mouse" => stats.mouse_clicks += 1,
+            "keyboard" => stats.key_presses += 1,
+            _ => {}
+        }
+
+        ActivityEventPayload {
+            activity_kind,
+            stats: stats.clone(),
+        }
+    };
+
+    let _ = app.emit("activity-detected", &payload);
+    let _ = app.emit("activity-stats-updated", &payload.stats);
+    Ok(())
+}
+
+fn start_activity_listener(app: AppHandle) {
+    let listener_app = app.clone();
+
+    thread::spawn(move || {
+        let callback = move |event: Event| match event.event_type {
+            EventType::ButtonPress(_) => {
+                let state = listener_app.state::<ActivityState>();
+                let _ = record_activity(&listener_app, state.inner(), "mouse");
+            }
+            EventType::KeyPress(_) => {
+                let state = listener_app.state::<ActivityState>();
+                let _ = record_activity(&listener_app, state.inner(), "keyboard");
+            }
+            _ => {}
+        };
+
+        if let Err(error) = listen(callback) {
+            let _ = app.emit("activity-listener-error", format!("{error:?}"));
+        }
+    });
 }
 
 fn move_pet_to_position(app: &AppHandle, position: &str, size: u32) -> Result<(), String> {
@@ -70,21 +167,29 @@ fn resize_pet(app: &AppHandle, size: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn show_pet(app: AppHandle) -> Result<(), String> {
+fn show_pet(app: AppHandle, state: State<'_, ActivityState>) -> Result<(), String> {
     let window = get_pet_window(&app)?;
     resize_pet(&app, DEFAULT_SIZE)?;
     move_pet_to_position(&app, DEFAULT_POSITION, pet_size(DEFAULT_SIZE))?;
     window.show().map_err(|error| error.to_string())?;
     window
         .set_always_on_top(true)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+
+    let stats = set_pet_active(&state, true)?;
+    emit_activity_stats(&app, &stats);
+    Ok(())
 }
 
 #[tauri::command]
-fn hide_pet(app: AppHandle) -> Result<(), String> {
+fn hide_pet(app: AppHandle, state: State<'_, ActivityState>) -> Result<(), String> {
     get_pet_window(&app)?
         .hide()
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+
+    let stats = set_pet_active(&state, false)?;
+    emit_activity_stats(&app, &stats);
+    Ok(())
 }
 
 #[tauri::command]
@@ -109,6 +214,31 @@ fn set_pet_opacity(app: AppHandle, opacity: f64) -> Result<(), String> {
     get_pet_window(&app)?
         .emit("pet-opacity-changed", opacity)
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_activity_stats(state: State<'_, ActivityState>) -> Result<ActivitySnapshot, String> {
+    state
+        .inner
+        .lock()
+        .map(|stats| stats.clone())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_activity_tracking_enabled(
+    app: AppHandle,
+    state: State<'_, ActivityState>,
+    enabled: bool,
+) -> Result<ActivitySnapshot, String> {
+    let snapshot = {
+        let mut stats = state.inner.lock().map_err(|error| error.to_string())?;
+        stats.tracking_enabled = enabled;
+        stats.clone()
+    };
+
+    emit_activity_stats(&app, &snapshot);
+    Ok(snapshot)
 }
 
 fn create_pet_window(app: &tauri::App) -> tauri::Result<()> {
@@ -190,10 +320,14 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
                 }
             }
             "show_pet" => {
-                let _ = show_pet(app.clone());
+                if let Some(state) = app.try_state::<ActivityState>() {
+                    let _ = show_pet(app.clone(), state);
+                }
             }
             "hide_pet" => {
-                let _ = hide_pet(app.clone());
+                if let Some(state) = app.try_state::<ActivityState>() {
+                    let _ = hide_pet(app.clone(), state);
+                }
             }
             "position_top_left" => {
                 let _ = set_pet_position(app.clone(), "top-left".to_string());
@@ -236,10 +370,12 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(ActivityState::default())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             create_pet_window(app)?;
             create_tray(app)?;
+            start_activity_listener(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -247,7 +383,9 @@ pub fn run() {
             hide_pet,
             set_pet_position,
             set_pet_size,
-            set_pet_opacity
+            set_pet_opacity,
+            get_activity_stats,
+            set_activity_tracking_enabled
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
