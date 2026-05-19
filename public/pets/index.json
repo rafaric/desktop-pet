@@ -1,0 +1,12 @@
+{
+  "pets": [
+    {
+      "id": "demo",
+      "manifest": "/pets/demo/manifest.json"
+    },
+    {
+      "id": "fox",
+      "manifest": "/pets/fox/manifest.json"
+    }
+  ]
+}

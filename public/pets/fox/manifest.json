@@ -1,0 +1,13 @@
+{
+  "id": "fox",
+  "name": "Fox",
+  "status": "Próximamente",
+  "description": "Ejemplo de futura mascota comprada y descargada desde un petpack local.",
+  "previewFrame": "../demo/idle.png",
+  "idleFrame": "../demo/idle.png",
+  "activeFrames": [
+    "../demo/active-01.png"
+  ],
+  "supportsSkins": false,
+  "skins": []
+}

@@ -44,6 +44,29 @@ type ActivityEventPayload = {
 	stats: ActivityStats;
 };
 
+type PetSkinCatalogItem = {
+	id: string;
+	name: string;
+	price: number;
+	description: string;
+};
+
+type PetManifest = {
+	id: string;
+	name: string;
+	status: string;
+	description: string;
+	previewFrame: string;
+	idleFrame: string;
+	activeFrames: string[];
+	supportsSkins: boolean;
+	skins: PetSkinCatalogItem[];
+};
+
+type PetIndexFile = {
+	pets: { id: string; manifest: string }[];
+};
+
 const initialActivityStats: ActivityStats = {
 	points: 0,
 	mouse_clicks: 0,
@@ -54,40 +77,59 @@ const initialActivityStats: ActivityStats = {
 
 const demoPetId = "demo";
 
-const petAssets: Record<string, { idleFrame: string; activeFrames: string[] }> =
+const defaultPetCatalog: PetManifest[] = [
 	{
-		[demoPetId]: {
-			idleFrame: "/pets/demo/idle.png",
-			activeFrames: [
-				"/pets/demo/active-01.png",
-				"/pets/demo/active-02.png",
-				"/pets/demo/active-03.png",
-				"/pets/demo/active-04.png",
-				"/pets/demo/active-05.png",
-			],
-		},
-	};
-
-const petIdleFrame = petAssets[demoPetId].idleFrame;
-const demoSkins = [
-	{
-		id: "default",
-		name: "Original",
-		price: 0,
-		description: "Aspecto base de la mascota demo.",
+		id: demoPetId,
+		name: "Demo Pet",
+		status: "Descargada",
+		description: "Mascota local de prueba incluida en el prototipo.",
+		previewFrame: "/pets/demo/idle.png",
+		idleFrame: "/pets/demo/idle.png",
+		activeFrames: [
+			"/pets/demo/active-01.png",
+			"/pets/demo/active-02.png",
+			"/pets/demo/active-03.png",
+			"/pets/demo/active-04.png",
+			"/pets/demo/active-05.png",
+		],
+		supportsSkins: true,
+		skins: [
+			{
+				id: "default",
+				name: "Original",
+				price: 0,
+				description: "Aspecto base de la mascota demo.",
+			},
+			{
+				id: "mint",
+				name: "Menta",
+				price: 25,
+				description: "Tono frío y suave.",
+			},
+			{
+				id: "berry",
+				name: "Berry",
+				price: 50,
+				description: "Variante rosada más intensa.",
+			},
+			{
+				id: "night",
+				name: "Noche",
+				price: 100,
+				description: "Look oscuro para escritorios nocturnos.",
+			},
+		],
 	},
-	{ id: "mint", name: "Menta", price: 25, description: "Tono frío y suave." },
 	{
-		id: "berry",
-		name: "Berry",
-		price: 50,
-		description: "Variante rosada más intensa.",
-	},
-	{
-		id: "night",
-		name: "Noche",
-		price: 100,
-		description: "Look oscuro para escritorios nocturnos.",
+		id: "fox",
+		name: "Fox",
+		status: "Próximamente",
+		description: "Ejemplo de futura mascota comprada y descargada.",
+		previewFrame: "/pets/demo/idle.png",
+		idleFrame: "/pets/demo/idle.png",
+		activeFrames: ["/pets/demo/active-01.png"],
+		supportsSkins: false,
+		skins: [],
 	},
 ];
 
@@ -101,20 +143,63 @@ const initialPetLibraryState: PetLibraryState = {
 	downloaded_pets: [demoPetId],
 };
 
-const localPets = [
-	{
-		id: demoPetId,
-		name: "Demo Pet",
-		status: "Descargada",
-		description: "Mascota local de prueba incluida en el prototipo.",
-	},
-	{
-		id: "fox",
-		name: "Fox",
-		status: "Próximamente",
-		description: "Ejemplo de futura mascota comprada y descargada.",
-	},
-];
+function resolveManifestAsset(manifestUrl: string, assetPath: string) {
+	if (assetPath.startsWith("/")) {
+		return assetPath;
+	}
+
+	return new URL(
+		assetPath,
+		new URL(manifestUrl, window.location.origin),
+	).toString();
+}
+
+async function loadLocalPetCatalog(): Promise<PetManifest[]> {
+	try {
+		const indexResponse = await fetch("/pets/index.json");
+		if (!indexResponse.ok) {
+			throw new Error("pet index not found");
+		}
+
+		const index = (await indexResponse.json()) as PetIndexFile;
+		const manifestResults = await Promise.allSettled(
+			index.pets.map(async (pet) => {
+				const manifestResponse = await fetch(pet.manifest);
+				if (!manifestResponse.ok) {
+					throw new Error(`manifest not found for ${pet.id}`);
+				}
+
+				const manifest = (await manifestResponse.json()) as PetManifest;
+				return {
+					...manifest,
+					previewFrame: resolveManifestAsset(
+						pet.manifest,
+						manifest.previewFrame,
+					),
+					idleFrame: resolveManifestAsset(pet.manifest, manifest.idleFrame),
+					activeFrames: manifest.activeFrames.map((frame) =>
+						resolveManifestAsset(pet.manifest, frame),
+					),
+				};
+			}),
+		);
+
+		const manifests = manifestResults
+			.filter(
+				(result): result is PromiseFulfilledResult<PetManifest> =>
+					result.status === "fulfilled",
+			)
+			.map((result) => result.value);
+
+		return manifests.length > 0 ? manifests : defaultPetCatalog;
+	} catch {
+		return defaultPetCatalog;
+	}
+}
+
+function normalisePetFrames(pet: PetManifest) {
+	return pet.activeFrames.length > 0 ? pet.activeFrames : [pet.idleFrame];
+}
 
 type ControlButtonProps = {
 	children: React.ReactNode;
@@ -144,6 +229,8 @@ function MainWindow() {
 		return () => document.body.classList.remove("main-window");
 	}, []);
 
+	const [petCatalog, setPetCatalog] =
+		useState<PetManifest[]>(defaultPetCatalog);
 	const [position, setPosition] = useState<PetPosition>("bottom-right");
 	const [size, setSize] = useState<PetSize>("medium");
 	const [opacity, setOpacity] = useState(1);
@@ -155,6 +242,10 @@ function MainWindow() {
 		initialPetLibraryState,
 	);
 	const [lastActivity, setLastActivity] = useState<ActivityKind | null>(null);
+
+	useEffect(() => {
+		void loadLocalPetCatalog().then(setPetCatalog);
+	}, []);
 
 	useEffect(() => {
 		void invoke<PersistedState>("get_app_state").then((persisted) => {
@@ -265,7 +356,13 @@ function MainWindow() {
 	}
 
 	const activePetId = petLibrary.active_pet_id;
-	const activePetSupportsSkins = activePetId === demoPetId;
+	const activePet =
+		petCatalog.find((pet) => pet.id === activePetId) ??
+		petCatalog.find((pet) => pet.id === demoPetId) ??
+		defaultPetCatalog[0];
+	const activePetSupportsSkins =
+		activePet.id === demoPetId && activePet.supportsSkins;
+	const activePetSkins = activePetSupportsSkins ? activePet.skins : [];
 
 	function isSkinUnlocked(skinId: string) {
 		return skinState.unlocked_skins[activePetId]?.includes(skinId) ?? false;
@@ -279,11 +376,11 @@ function MainWindow() {
 		});
 	}
 
-	async function unlockOrUseSkin(skin: (typeof demoSkins)[number]) {
+	async function unlockOrUseSkin(skin: PetSkinCatalogItem) {
 		await runSafely(async () => {
 			if (!activePetSupportsSkins) {
 				throw new Error(
-					"skins are only available for the demo pet in this prototype",
+					"skins are only available for the active pet when its manifest enables them",
 				);
 			}
 
@@ -310,12 +407,12 @@ function MainWindow() {
 	return (
 		<main className="main-shell">
 			<section className="hero-card">
-				<p className="eyebrow">PoC 2</p>
-				<h1>Desktop Pet Activity</h1>
+				<p className="eyebrow">PoC 3</p>
+				<h1>Local Pet Library</h1>
 				<p className="summary">
-					Validamos puntos locales por clics y teclado globales solo mientras la
-					mascota está activa. La app cuenta eventos, no guarda texto ni teclas
-					exactas.
+					La app ahora carga mascotas desde manifests locales compatibles con
+					petpack. La demo sigue embebida, pero la estructura ya no depende de
+					assets hardcodeados en la UI.
 				</p>
 
 				<div className="primary-actions">
@@ -337,12 +434,12 @@ function MainWindow() {
 					<p className="eyebrow">Mascotas</p>
 					<h2>Biblioteca local</h2>
 					<p>
-						Primera versión de biblioteca: una mascota demo descargada y espacio
-						para futuras mascotas compradas desde la web.
+						Cada mascota viene desde un `manifest.json`. Por ahora la demo está
+						disponible y las demás quedan preparadas para futuras descargas.
 					</p>
 				</div>
 				<div className="pet-library-grid">
-					{localPets.map((pet) => {
+					{petCatalog.map((pet) => {
 						const downloaded = petLibrary.downloaded_pets.includes(pet.id);
 						const active = petLibrary.active_pet_id === pet.id;
 
@@ -352,7 +449,7 @@ function MainWindow() {
 								key={pet.id}
 							>
 								<div className="pet-preview">
-									<img src={petIdleFrame} alt={`${pet.name} preview`} />
+									<img src={pet.previewFrame} alt={`${pet.name} preview`} />
 								</div>
 								<div>
 									<h3>{pet.name}</h3>
@@ -469,12 +566,13 @@ function MainWindow() {
 					<p className="eyebrow">Skins</p>
 					<h2>Tienda local de skins</h2>
 					<p>
-						Las skins son de la mascota demo y se desbloquean con puntos
-						locales.
+						{activePetSupportsSkins
+							? `Skins de ${activePet.name}. La UI ya usa el manifest local; la lógica de compra sigue limitada a la demo pet en este prototipo.`
+							: `${activePet.name} no tiene skins habilitadas en esta versión del prototipo.`}
 					</p>
 				</div>
 				<div className="skins-grid">
-					{demoSkins.map((skin) => {
+					{activePetSkins.map((skin) => {
 						const unlocked = isSkinUnlocked(skin.id);
 						const active = skinState.active_skin_id === skin.id;
 						const affordable = activityStats.points >= skin.price;
@@ -482,7 +580,10 @@ function MainWindow() {
 						return (
 							<article className={`skin-card skin-${skin.id}`} key={skin.id}>
 								<div className="skin-preview">
-									<img src={petIdleFrame} alt={`${skin.name} skin preview`} />
+									<img
+										src={activePet.previewFrame}
+										alt={`${skin.name} skin preview`}
+									/>
 								</div>
 								<div>
 									<h3>{skin.name}</h3>
@@ -543,21 +644,21 @@ function MainWindow() {
 	);
 }
 
-function DemoPet({
+function PetSprite({
 	opacity,
 	size,
 	active,
 	skinId,
-	petId,
+	pet,
 }: {
 	opacity: number;
 	size: PetSize;
 	active: boolean;
 	skinId: string;
-	petId: string;
+	pet: PetManifest;
 }) {
 	const [frameIndex, setFrameIndex] = useState(0);
-	const assets = petAssets[petId] ?? petAssets[demoPetId];
+	const activeFrames = normalisePetFrames(pet);
 
 	useEffect(() => {
 		if (!active) {
@@ -566,20 +667,22 @@ function DemoPet({
 		}
 
 		const interval = window.setInterval(() => {
-			setFrameIndex((current) => (current + 1) % assets.activeFrames.length);
+			setFrameIndex((current) => (current + 1) % activeFrames.length);
 		}, 180);
 
 		return () => window.clearInterval(interval);
-	}, [active, assets.activeFrames.length]);
+	}, [active, activeFrames.length]);
 
-	const frame = active ? assets.activeFrames[frameIndex] : assets.idleFrame;
+	const frame = active ? activeFrames[frameIndex] : pet.idleFrame;
+	const renderedSkinId =
+		pet.id === demoPetId && pet.supportsSkins ? skinId : "default";
 
 	return (
 		<div
-			className={`pet-stage image-pet ${size} skin-${skinId} ${active ? "is-active" : ""}`}
+			className={`pet-stage image-pet ${size} skin-${renderedSkinId} ${active ? "is-active" : ""}`}
 			style={{ opacity }}
 		>
-			<img src={frame} alt="Demo desktop pet" draggable={false} />
+			<img src={frame} alt={`${pet.name} desktop pet`} draggable={false} />
 		</div>
 	);
 }
@@ -590,12 +693,18 @@ function PetOverlay() {
 		return () => document.body.classList.remove("pet-window");
 	}, []);
 
+	const [petCatalog, setPetCatalog] =
+		useState<PetManifest[]>(defaultPetCatalog);
 	const [opacity, setOpacity] = useState(1);
 	const [size, setSize] = useState<PetSize>("medium");
 	const [skinId, setSkinId] = useState("default");
 	const [petId, setPetId] = useState(demoPetId);
 	const [active, setActive] = useState(false);
 	const activeTimeout = useRef<number | null>(null);
+
+	useEffect(() => {
+		void loadLocalPetCatalog().then(setPetCatalog);
+	}, []);
 
 	useEffect(() => {
 		void invoke<PersistedState>("get_app_state").then((persisted) => {
@@ -640,14 +749,19 @@ function PetOverlay() {
 		};
 	}, []);
 
+	const activePet =
+		petCatalog.find((pet) => pet.id === petId) ??
+		petCatalog.find((pet) => pet.id === demoPetId) ??
+		defaultPetCatalog[0];
+
 	return (
 		<main className="overlay-shell">
-			<DemoPet
+			<PetSprite
 				opacity={opacity}
 				size={size}
 				active={active}
 				skinId={skinId}
-				petId={petId}
+				pet={activePet}
 			/>
 		</main>
 	);

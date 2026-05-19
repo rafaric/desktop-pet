@@ -1,0 +1,42 @@
+{
+  "id": "demo",
+  "name": "Demo Pet",
+  "status": "Descargada",
+  "description": "Mascota local de prueba incluida en el prototipo.",
+  "previewFrame": "idle.png",
+  "idleFrame": "idle.png",
+  "activeFrames": [
+    "active-01.png",
+    "active-02.png",
+    "active-03.png",
+    "active-04.png",
+    "active-05.png"
+  ],
+  "supportsSkins": true,
+  "skins": [
+    {
+      "id": "default",
+      "name": "Original",
+      "price": 0,
+      "description": "Aspecto base de la mascota demo."
+    },
+    {
+      "id": "mint",
+      "name": "Menta",
+      "price": 25,
+      "description": "Tono frío y suave."
+    },
+    {
+      "id": "berry",
+      "name": "Berry",
+      "price": 50,
+      "description": "Variante rosada más intensa."
+    },
+    {
+      "id": "night",
+      "name": "Noche",
+      "price": 100,
+      "description": "Look oscuro para escritorios nocturnos."
+    }
+  ]
+}
