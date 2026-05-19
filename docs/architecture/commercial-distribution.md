@@ -205,7 +205,7 @@ Done when:
 
 Required before public launch:
 
-- zip entry count and total extracted size limits;
+- revisit petpack zip limits for production thresholds (current extractor has entry, per-file, and total extracted size limits);
 - clearer user-facing import errors;
 - signing key management plan;
 - app update and minimum supported app version behavior;

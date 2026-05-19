@@ -2,7 +2,8 @@ use rdev::{listen, Event, EventType};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    fs, io,
+    fs,
+    io::{self, Read},
     path::{Path, PathBuf},
     sync::Mutex,
     thread,
@@ -22,6 +23,9 @@ const DEFAULT_SIZE: &str = "medium";
 const DEFAULT_OPACITY: f64 = 1.0;
 const STORE_FILE_NAME: &str = "desktop-pet-state.json";
 const DEMO_PET_ID: &str = "demo";
+const MAX_PETPACK_ENTRIES: usize = 128;
+const MAX_PETPACK_FILE_BYTES: u64 = 10 * 1024 * 1024;
+const MAX_PETPACK_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
 const DEFAULT_SKIN_ID: &str = "default";
 const DEMO_SKINS: &[(&str, u64)] = &[("default", 0), ("mint", 25), ("berry", 50), ("night", 100)];
 
@@ -208,6 +212,11 @@ fn temporary_import_dir(app_handle: &AppHandle) -> Result<PathBuf, String> {
 fn extract_zip_to_dir(zip_path: &Path, destination: &Path) -> Result<(), String> {
     let file = fs::File::open(zip_path).map_err(|error| error.to_string())?;
     let mut archive = ZipArchive::new(file).map_err(|error| error.to_string())?;
+    if archive.len() > MAX_PETPACK_ENTRIES {
+        return Err("petpack contains too many files".to_string());
+    }
+
+    let mut total_extracted_bytes = 0_u64;
 
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
@@ -226,7 +235,22 @@ fn extract_zip_to_dir(zip_path: &Path, destination: &Path) -> Result<(), String>
         }
 
         let mut output_file = fs::File::create(&output_path).map_err(|error| error.to_string())?;
-        io::copy(&mut entry, &mut output_file).map_err(|error| error.to_string())?;
+        let remaining_total_bytes = MAX_PETPACK_TOTAL_BYTES - total_extracted_bytes;
+        let entry_limit = MAX_PETPACK_FILE_BYTES.min(remaining_total_bytes);
+        let bytes_copied = io::copy(&mut entry.by_ref().take(entry_limit + 1), &mut output_file)
+            .map_err(|error| error.to_string())?;
+
+        if bytes_copied > MAX_PETPACK_FILE_BYTES {
+            let _ = fs::remove_file(&output_path);
+            return Err("petpack contains a file that is too large".to_string());
+        }
+
+        if total_extracted_bytes + bytes_copied > MAX_PETPACK_TOTAL_BYTES {
+            let _ = fs::remove_file(&output_path);
+            return Err("petpack is too large".to_string());
+        }
+
+        total_extracted_bytes += bytes_copied;
     }
 
     Ok(())
