@@ -27,10 +27,16 @@ type SkinState = {
 	unlocked_skins: Record<string, string[]>;
 };
 
+type PetLibraryState = {
+	active_pet_id: string;
+	downloaded_pets: string[];
+};
+
 type PersistedState = {
 	activity: ActivityStats;
 	settings: PetSettings;
 	skins: SkinState;
+	pets: PetLibraryState;
 };
 
 type ActivityEventPayload = {
@@ -46,16 +52,23 @@ const initialActivityStats: ActivityStats = {
 	pet_active: false,
 };
 
-const petIdleFrame = "/pets/demo/idle.png";
-const petActiveFrames = [
-	"/pets/demo/active-01.png",
-	"/pets/demo/active-02.png",
-	"/pets/demo/active-03.png",
-	"/pets/demo/active-04.png",
-	"/pets/demo/active-05.png",
-];
-
 const demoPetId = "demo";
+
+const petAssets: Record<string, { idleFrame: string; activeFrames: string[] }> =
+	{
+		[demoPetId]: {
+			idleFrame: "/pets/demo/idle.png",
+			activeFrames: [
+				"/pets/demo/active-01.png",
+				"/pets/demo/active-02.png",
+				"/pets/demo/active-03.png",
+				"/pets/demo/active-04.png",
+				"/pets/demo/active-05.png",
+			],
+		},
+	};
+
+const petIdleFrame = petAssets[demoPetId].idleFrame;
 const demoSkins = [
 	{
 		id: "default",
@@ -82,6 +95,26 @@ const initialSkinState: SkinState = {
 	active_skin_id: "default",
 	unlocked_skins: { [demoPetId]: ["default"] },
 };
+
+const initialPetLibraryState: PetLibraryState = {
+	active_pet_id: demoPetId,
+	downloaded_pets: [demoPetId],
+};
+
+const localPets = [
+	{
+		id: demoPetId,
+		name: "Demo Pet",
+		status: "Descargada",
+		description: "Mascota local de prueba incluida en el prototipo.",
+	},
+	{
+		id: "fox",
+		name: "Fox",
+		status: "Próximamente",
+		description: "Ejemplo de futura mascota comprada y descargada.",
+	},
+];
 
 type ControlButtonProps = {
 	children: React.ReactNode;
@@ -118,12 +151,16 @@ function MainWindow() {
 	const [activityStats, setActivityStats] =
 		useState<ActivityStats>(initialActivityStats);
 	const [skinState, setSkinState] = useState<SkinState>(initialSkinState);
+	const [petLibrary, setPetLibrary] = useState<PetLibraryState>(
+		initialPetLibraryState,
+	);
 	const [lastActivity, setLastActivity] = useState<ActivityKind | null>(null);
 
 	useEffect(() => {
 		void invoke<PersistedState>("get_app_state").then((persisted) => {
 			setActivityStats(persisted.activity);
 			setSkinState(persisted.skins);
+			setPetLibrary(persisted.pets);
 			setPosition(persisted.settings.position);
 			setSize(persisted.settings.size);
 			setOpacity(persisted.settings.opacity);
@@ -144,6 +181,10 @@ function MainWindow() {
 		const unlistenSkinState = listen<SkinState>("skin-state-updated", (event) =>
 			setSkinState(event.payload),
 		);
+		const unlistenPetLibrary = listen<PetLibraryState>(
+			"pet-library-updated",
+			(event) => setPetLibrary(event.payload),
+		);
 		const unlistenActivity = listen<ActivityEventPayload>(
 			"activity-detected",
 			(event) => {
@@ -160,6 +201,7 @@ function MainWindow() {
 			void unlistenStats.then((unlisten) => unlisten());
 			void unlistenSettings.then((unlisten) => unlisten());
 			void unlistenSkinState.then((unlisten) => unlisten());
+			void unlistenPetLibrary.then((unlisten) => unlisten());
 			void unlistenActivity.then((unlisten) => unlisten());
 			void unlistenError.then((unlisten) => unlisten());
 		};
@@ -222,15 +264,32 @@ function MainWindow() {
 		});
 	}
 
+	const activePetId = petLibrary.active_pet_id;
+	const activePetSupportsSkins = activePetId === demoPetId;
+
 	function isSkinUnlocked(skinId: string) {
-		return skinState.unlocked_skins[demoPetId]?.includes(skinId) ?? false;
+		return skinState.unlocked_skins[activePetId]?.includes(skinId) ?? false;
+	}
+
+	async function usePet(petId: string) {
+		await runSafely(async () => {
+			const pets = await invoke<PetLibraryState>("set_active_pet", { petId });
+			setPetLibrary(pets);
+			setStatus("Pet selected.");
+		});
 	}
 
 	async function unlockOrUseSkin(skin: (typeof demoSkins)[number]) {
 		await runSafely(async () => {
+			if (!activePetSupportsSkins) {
+				throw new Error(
+					"skins are only available for the demo pet in this prototype",
+				);
+			}
+
 			if (isSkinUnlocked(skin.id)) {
 				const skins = await invoke<SkinState>("set_active_skin", {
-					petId: demoPetId,
+					petId: activePetId,
 					skinId: skin.id,
 				});
 				setSkinState(skins);
@@ -239,7 +298,7 @@ function MainWindow() {
 			}
 
 			const persisted = await invoke<PersistedState>("unlock_skin", {
-				petId: demoPetId,
+				petId: activePetId,
 				skinId: skin.id,
 			});
 			setActivityStats(persisted.activity);
@@ -270,6 +329,47 @@ function MainWindow() {
 					>
 						Ocultar mascota
 					</button>
+				</div>
+			</section>
+
+			<section className="pet-library-card">
+				<div className="section-heading">
+					<p className="eyebrow">Mascotas</p>
+					<h2>Biblioteca local</h2>
+					<p>
+						Primera versión de biblioteca: una mascota demo descargada y espacio
+						para futuras mascotas compradas desde la web.
+					</p>
+				</div>
+				<div className="pet-library-grid">
+					{localPets.map((pet) => {
+						const downloaded = petLibrary.downloaded_pets.includes(pet.id);
+						const active = petLibrary.active_pet_id === pet.id;
+
+						return (
+							<article
+								className={`pet-card ${active ? "active" : ""}`}
+								key={pet.id}
+							>
+								<div className="pet-preview">
+									<img src={petIdleFrame} alt={`${pet.name} preview`} />
+								</div>
+								<div>
+									<h3>{pet.name}</h3>
+									<p>{pet.description}</p>
+									<span>{downloaded ? pet.status : "No descargada"}</span>
+								</div>
+								<button
+									className={active ? "active" : undefined}
+									disabled={active || !downloaded}
+									type="button"
+									onClick={() => usePet(pet.id)}
+								>
+									{active ? "Activa" : downloaded ? "Usar" : pet.status}
+								</button>
+							</article>
+						);
+					})}
 				</div>
 			</section>
 
@@ -393,7 +493,11 @@ function MainWindow() {
 								</div>
 								<button
 									className={active ? "active" : undefined}
-									disabled={active || (!unlocked && !affordable)}
+									disabled={
+										!activePetSupportsSkins ||
+										active ||
+										(!unlocked && !affordable)
+									}
 									type="button"
 									onClick={() => unlockOrUseSkin(skin)}
 								>
@@ -444,13 +548,16 @@ function DemoPet({
 	size,
 	active,
 	skinId,
+	petId,
 }: {
 	opacity: number;
 	size: PetSize;
 	active: boolean;
 	skinId: string;
+	petId: string;
 }) {
 	const [frameIndex, setFrameIndex] = useState(0);
+	const assets = petAssets[petId] ?? petAssets[demoPetId];
 
 	useEffect(() => {
 		if (!active) {
@@ -459,13 +566,13 @@ function DemoPet({
 		}
 
 		const interval = window.setInterval(() => {
-			setFrameIndex((current) => (current + 1) % petActiveFrames.length);
+			setFrameIndex((current) => (current + 1) % assets.activeFrames.length);
 		}, 180);
 
 		return () => window.clearInterval(interval);
-	}, [active]);
+	}, [active, assets.activeFrames.length]);
 
-	const frame = active ? petActiveFrames[frameIndex] : petIdleFrame;
+	const frame = active ? assets.activeFrames[frameIndex] : assets.idleFrame;
 
 	return (
 		<div
@@ -486,6 +593,7 @@ function PetOverlay() {
 	const [opacity, setOpacity] = useState(1);
 	const [size, setSize] = useState<PetSize>("medium");
 	const [skinId, setSkinId] = useState("default");
+	const [petId, setPetId] = useState(demoPetId);
 	const [active, setActive] = useState(false);
 	const activeTimeout = useRef<number | null>(null);
 
@@ -494,6 +602,7 @@ function PetOverlay() {
 			setOpacity(persisted.settings.opacity);
 			setSize(persisted.settings.size);
 			setSkinId(persisted.skins.active_skin_id);
+			setPetId(persisted.pets.active_pet_id);
 		});
 
 		const unlistenOpacity = listen<number>("pet-opacity-changed", (event) => {
@@ -504,6 +613,9 @@ function PetOverlay() {
 		});
 		const unlistenSkin = listen<string>("pet-skin-changed", (event) => {
 			setSkinId(event.payload);
+		});
+		const unlistenPet = listen<string>("pet-active-changed", (event) => {
+			setPetId(event.payload);
 		});
 		const unlistenActivity = listen<ActivityEventPayload>(
 			"activity-detected",
@@ -523,13 +635,20 @@ function PetOverlay() {
 			void unlistenOpacity.then((unlisten) => unlisten());
 			void unlistenSize.then((unlisten) => unlisten());
 			void unlistenSkin.then((unlisten) => unlisten());
+			void unlistenPet.then((unlisten) => unlisten());
 			void unlistenActivity.then((unlisten) => unlisten());
 		};
 	}, []);
 
 	return (
 		<main className="overlay-shell">
-			<DemoPet opacity={opacity} size={size} active={active} skinId={skinId} />
+			<DemoPet
+				opacity={opacity}
+				size={size}
+				active={active}
+				skinId={skinId}
+				petId={petId}
+			/>
 		</main>
 	);
 }

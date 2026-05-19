@@ -123,7 +123,8 @@ h2 {
 
 .stats-grid,
 .control-grid,
-.skins-grid {
+.skins-grid,
+.pet-library-grid {
 	display: grid;
 	gap: 18px;
 	margin-top: 18px;
@@ -141,10 +142,16 @@ h2 {
 	grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.pet-library-grid {
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .control-card,
 .stat-card,
 .skin-card,
+.pet-card,
 .skins-card,
+.pet-library-card,
 .privacy-card {
 	padding: 24px;
 }
@@ -175,7 +182,8 @@ h2 {
 	background: #8fe3c2;
 }
 
-.skins-card {
+.skins-card,
+.pet-library-card {
 	margin-top: 18px;
 	border: 1px solid rgba(64, 48, 31, 0.1);
 	border-radius: 32px;
@@ -189,6 +197,7 @@ h2 {
 	color: #66746d;
 }
 
+.pet-card,
 .skin-card {
 	display: grid;
 	grid-template-rows: auto 1fr auto;
@@ -198,25 +207,34 @@ h2 {
 	background: #fff8ee;
 }
 
+.pet-card.active {
+	outline: 3px solid rgba(143, 227, 194, 0.8);
+}
+
+.pet-card h3,
 .skin-card h3 {
 	margin: 0 0 0.35rem;
 }
 
+.pet-card p,
 .skin-card p {
 	margin-bottom: 0.7rem;
 	color: #66746d;
 }
 
+.pet-card span,
 .skin-card span {
 	font-weight: 800;
 }
 
+.pet-card button:disabled,
 .skin-card button:disabled {
 	cursor: not-allowed;
 	opacity: 0.5;
 	transform: none;
 }
 
+.pet-preview,
 .skin-preview {
 	display: grid;
 	aspect-ratio: 1;
@@ -226,6 +244,7 @@ h2 {
 	overflow: hidden;
 }
 
+.pet-preview img,
 .skin-preview img {
 	width: 88%;
 	height: 88%;
@@ -338,7 +357,8 @@ h2 {
 
 	.stats-grid,
 	.control-grid,
-	.skins-grid {
+	.skins-grid,
+	.pet-library-grid {
 		grid-template-columns: 1fr;
 	}
 

@@ -73,6 +73,21 @@ impl Default for SkinState {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+struct PetLibraryState {
+    active_pet_id: String,
+    downloaded_pets: Vec<String>,
+}
+
+impl Default for PetLibraryState {
+    fn default() -> Self {
+        Self {
+            active_pet_id: DEMO_PET_ID.to_string(),
+            downloaded_pets: vec![DEMO_PET_ID.to_string()],
+        }
+    }
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct PersistedState {
     #[serde(default)]
@@ -81,6 +96,8 @@ struct PersistedState {
     settings: PetSettings,
     #[serde(default)]
     skins: SkinState,
+    #[serde(default)]
+    pets: PetLibraryState,
 }
 
 #[derive(Clone, Serialize)]
@@ -111,6 +128,27 @@ fn app_state_path(app: &tauri::App) -> Result<PathBuf, String> {
     Ok(app_data_dir.join(STORE_FILE_NAME))
 }
 
+fn ensure_demo_pet(state: &mut PersistedState) {
+    if !state
+        .pets
+        .downloaded_pets
+        .iter()
+        .any(|pet| pet == DEMO_PET_ID)
+    {
+        state.pets.downloaded_pets.push(DEMO_PET_ID.to_string());
+    }
+
+    if state.pets.active_pet_id.is_empty()
+        || !state
+            .pets
+            .downloaded_pets
+            .iter()
+            .any(|pet| pet == &state.pets.active_pet_id)
+    {
+        state.pets.active_pet_id = DEMO_PET_ID.to_string();
+    }
+}
+
 fn ensure_default_skin(state: &mut PersistedState) {
     let unlocked = state
         .skins
@@ -136,6 +174,7 @@ fn load_persisted_state(path: &PathBuf) -> PersistedState {
         .ok()
         .and_then(|content| serde_json::from_str::<PersistedState>(&content).ok())
         .unwrap_or_default();
+    ensure_demo_pet(&mut state);
     ensure_default_skin(&mut state);
     state
 }
@@ -160,6 +199,14 @@ fn emit_settings(app: &AppHandle, settings: &PetSettings) {
 
 fn emit_skin_state(app: &AppHandle, skins: &SkinState) {
     let _ = app.emit("skin-state-updated", skins);
+}
+
+fn emit_pet_library_state(app: &AppHandle, pets: &PetLibraryState) {
+    let _ = app.emit("pet-library-updated", pets);
+}
+
+fn emit_active_pet(app: &AppHandle, pet_id: &str) {
+    let _ = app.emit("pet-active-changed", pet_id);
 }
 
 fn update_persisted_state<F>(app_state: &AppState, update: F) -> Result<PersistedState, String>
@@ -326,6 +373,8 @@ fn show_pet(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     emit_activity_stats(&app, &snapshot.activity);
     emit_settings(&app, &snapshot.settings);
     emit_skin_state(&app, &snapshot.skins);
+    emit_pet_library_state(&app, &snapshot.pets);
+    emit_active_pet(&app, &snapshot.pets.active_pet_id);
     set_pet_skin_event(&app, &snapshot.skins.active_skin_id)?;
     Ok(())
 }
@@ -424,6 +473,37 @@ fn set_activity_tracking_enabled(
 
     emit_activity_stats(&app, &snapshot.activity);
     Ok(snapshot.activity)
+}
+
+#[tauri::command]
+fn set_active_pet(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pet_id: String,
+) -> Result<PetLibraryState, String> {
+    let snapshot = {
+        let app_state = state.inner();
+        let mut persisted = app_state.inner.lock().map_err(|error| error.to_string())?;
+        ensure_demo_pet(&mut persisted);
+
+        if !persisted
+            .pets
+            .downloaded_pets
+            .iter()
+            .any(|downloaded_pet| downloaded_pet == &pet_id)
+        {
+            return Err("pet is not downloaded".to_string());
+        }
+
+        persisted.pets.active_pet_id = pet_id;
+        let snapshot = persisted.clone();
+        save_persisted_state(app_state, &snapshot)?;
+        snapshot
+    };
+
+    emit_pet_library_state(&app, &snapshot.pets);
+    emit_active_pet(&app, &snapshot.pets.active_pet_id);
+    Ok(snapshot.pets)
 }
 
 #[tauri::command]
@@ -672,6 +752,7 @@ pub fn run() {
             get_activity_stats,
             get_app_state,
             set_activity_tracking_enabled,
+            set_active_pet,
             unlock_skin,
             set_active_skin
         ])
