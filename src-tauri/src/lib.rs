@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use rdev::{listen, Event, EventType};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
@@ -99,13 +100,13 @@ struct PetManifest {
     source: Option<String>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct PetpackAssetDigest {
     path: String,
     sha256: String,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct PetpackMetadata {
     #[serde(rename = "schemaVersion")]
     schema_version: u64,
@@ -124,14 +125,14 @@ struct PetpackMetadata {
     assets: Vec<PetpackAssetDigest>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct LicenseSubject {
     #[serde(rename = "type")]
     subject_type: String,
     id: String,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct PetpackLicense {
     #[serde(rename = "licenseId")]
     license_id: String,
@@ -419,6 +420,17 @@ fn digest_matches_declared(digest: &[u8], declared: &str) -> bool {
             .is_ok_and(|decoded| decoded == digest)
 }
 
+fn canonical_signature_payload(
+    petpack: &PetpackMetadata,
+    license: &PetpackLicense,
+) -> Result<Vec<u8>, String> {
+    let payload = json!({
+        "license": license,
+        "petpack": petpack,
+    });
+    serde_json_canonicalizer::to_vec(&payload).map_err(|error| error.to_string())
+}
+
 fn collect_named_file_dirs(
     root: &Path,
     file_name: &str,
@@ -490,6 +502,7 @@ fn validate_petpack_v2_metadata(
 
     let petpack = read_json_file::<PetpackMetadata>(&petpack_path)?;
     let license = read_json_file::<PetpackLicense>(&license_path)?;
+    let _canonical_payload = canonical_signature_payload(&petpack, &license)?;
 
     if petpack.schema_version != 2 {
         return Err("unsupported petpack schema version".to_string());
@@ -1399,6 +1412,44 @@ mod tests {
         )
     }
 
+    fn sample_petpack_metadata(idle_hash: &str, active_hash: &str) -> PetpackMetadata {
+        PetpackMetadata {
+            schema_version: 2,
+            package_id: "petpack_chimmy_1_0_0".to_string(),
+            pet_id: "chimmy".to_string(),
+            pet_version: "1.0.0".to_string(),
+            minimum_app_version: "0.1.0".to_string(),
+            manifest_path: "manifest.json".to_string(),
+            license_path: "license.json".to_string(),
+            assets: vec![
+                PetpackAssetDigest {
+                    path: "assets/idle.png".to_string(),
+                    sha256: idle_hash.to_string(),
+                },
+                PetpackAssetDigest {
+                    path: "assets/active.png".to_string(),
+                    sha256: active_hash.to_string(),
+                },
+            ],
+        }
+    }
+
+    fn sample_petpack_license() -> PetpackLicense {
+        PetpackLicense {
+            license_id: "lic_test".to_string(),
+            entitlement_id: "ent_test".to_string(),
+            subject: LicenseSubject {
+                subject_type: "account".to_string(),
+                id: "user_test".to_string(),
+            },
+            pet_id: "chimmy".to_string(),
+            pet_version: "1.0.0".to_string(),
+            issued_at: "2026-05-22T00:00:00Z".to_string(),
+            expires_at: None,
+            revalidate_after: None,
+        }
+    }
+
     fn write_v2_metadata(dir: &Path, idle_hash: &str, active_hash: &str) {
         fs::write(
             dir.join(PETPACK_METADATA_FILE),
@@ -1435,6 +1486,20 @@ mod tests {
         .expect("write license metadata");
         fs::write(dir.join(PETPACK_SIGNATURE_FILE), "placeholder-signature")
             .expect("write signature");
+    }
+
+    #[test]
+    fn canonical_signature_payload_is_stable_jcs_json() {
+        let petpack = sample_petpack_metadata("abc", "def");
+        let license = sample_petpack_license();
+
+        let payload = canonical_signature_payload(&petpack, &license).expect("canonical payload");
+        let payload = String::from_utf8(payload).expect("utf8 payload");
+
+        assert_eq!(
+            payload,
+            r#"{"license":{"entitlementId":"ent_test","expiresAt":null,"issuedAt":"2026-05-22T00:00:00Z","licenseId":"lic_test","petId":"chimmy","petVersion":"1.0.0","revalidateAfter":null,"subject":{"id":"user_test","type":"account"}},"petpack":{"assets":[{"path":"assets/idle.png","sha256":"abc"},{"path":"assets/active.png","sha256":"def"}],"licensePath":"license.json","manifestPath":"manifest.json","minimumAppVersion":"0.1.0","packageId":"petpack_chimmy_1_0_0","petId":"chimmy","petVersion":"1.0.0","schemaVersion":2}}"#
+        );
     }
 
     #[test]
