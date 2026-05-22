@@ -13,6 +13,7 @@ node_modules
 dist
 dist-web
 dist-ssr
+tmp
 *.local
 
 # Editor directories and files

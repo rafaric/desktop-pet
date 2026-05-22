@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "web:dev": "vite web",
-    "web:build": "vite build web --outDir ../dist-web --emptyOutDir"
+    "web:build": "vite build web --outDir ../dist-web --emptyOutDir",
+    "petpack:dev": "cargo run --manifest-path src-tauri/Cargo.toml --bin generate_petpack --"
   },
   "dependencies": {
     "react": "^19.1.0",
