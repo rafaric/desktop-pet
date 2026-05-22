@@ -179,6 +179,12 @@ Done when:
 
 ### Phase 4 — Desktop account session
 
+Current development bridge:
+
+- desktop app exposes a temporary `user_test` account placeholder;
+- petpack v2 license subject must match that placeholder before install;
+- this is not real authentication and must be replaced before production.
+
 Done when:
 
 - desktop app can sign in or receive a browser login callback;

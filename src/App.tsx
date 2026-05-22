@@ -33,6 +33,12 @@ type PetLibraryState = {
 	downloaded_pets: string[];
 };
 
+type AccountSession = {
+	id: string;
+	email: string;
+	display_name: string;
+};
+
 type PersistedState = {
 	activity: ActivityStats;
 	settings: PetSettings;
@@ -78,6 +84,7 @@ const initialActivityStats: ActivityStats = {
 };
 
 const demoPetId = "demo";
+const developmentAccountId = "user_test";
 const petIdCollisionPrefix = "PET_ID_COLLISION:";
 const devImportsEnabled =
 	import.meta.env.DEV ||
@@ -156,6 +163,12 @@ const initialSkinState: SkinState = {
 const initialPetLibraryState: PetLibraryState = {
 	active_pet_id: demoPetId,
 	downloaded_pets: [demoPetId],
+};
+
+const initialAccountSession: AccountSession = {
+	id: developmentAccountId,
+	email: "user_test@example.com",
+	display_name: "Development User",
 };
 
 function resolveManifestAsset(manifestUrl: string, assetPath: string) {
@@ -282,6 +295,9 @@ function MainWindow() {
 	const [petLibrary, setPetLibrary] = useState<PetLibraryState>(
 		initialPetLibraryState,
 	);
+	const [currentAccount, setCurrentAccount] = useState<AccountSession>(
+		initialAccountSession,
+	);
 	const [lastActivity, setLastActivity] = useState<ActivityKind | null>(null);
 
 	async function refreshPetCatalog() {
@@ -290,6 +306,10 @@ function MainWindow() {
 
 	useEffect(() => {
 		void refreshPetCatalog();
+	}, []);
+
+	useEffect(() => {
+		void invoke<AccountSession>("get_current_account").then(setCurrentAccount);
 	}, []);
 
 	useEffect(() => {
@@ -598,6 +618,14 @@ function MainWindow() {
 					>
 						Ocultar mascota
 					</button>
+				</div>
+
+				<div className="account-card">
+					<p className="eyebrow">Cuenta · desarrollo</p>
+					<strong>{currentAccount.display_name}</strong>
+					<span>
+						{currentAccount.email} · license subject: {currentAccount.id}
+					</span>
 				</div>
 
 				{devImportsEnabled ? (

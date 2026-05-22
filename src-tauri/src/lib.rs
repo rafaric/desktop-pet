@@ -38,6 +38,8 @@ const PETPACK_PUBLIC_KEY_BYTES: [u8; 32] = [
     0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
     0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a,
 ];
+const DEVELOPMENT_ACCOUNT_ID: &str = "user_test";
+const DEVELOPMENT_ACCOUNT_EMAIL: &str = "user_test@example.com";
 const DEFAULT_SKIN_ID: &str = "default";
 const DEMO_SKINS: &[(&str, u64)] = &[("default", 0), ("mint", 25), ("berry", 50), ("night", 100)];
 
@@ -154,6 +156,13 @@ struct PetpackLicense {
     expires_at: Option<String>,
     #[serde(rename = "revalidateAfter")]
     revalidate_after: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct AccountSession {
+    id: String,
+    email: String,
+    display_name: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -560,6 +569,10 @@ fn validate_petpack_v2_metadata(
         || license.subject.subject_type != "account"
     {
         return Err("petpack license has invalid account metadata".to_string());
+    }
+
+    if license.subject.id != DEVELOPMENT_ACCOUNT_ID {
+        return Err("petpack license belongs to another account".to_string());
     }
 
     if license.expires_at.is_some() || license.revalidate_after.is_some() {
@@ -990,6 +1003,15 @@ fn get_app_state(state: State<'_, AppState>) -> Result<PersistedState, String> {
         .lock()
         .map(|state| state.clone())
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn get_current_account() -> AccountSession {
+    AccountSession {
+        id: DEVELOPMENT_ACCOUNT_ID.to_string(),
+        email: DEVELOPMENT_ACCOUNT_EMAIL.to_string(),
+        display_name: "Development User".to_string(),
+    }
 }
 
 #[tauri::command]
@@ -1472,12 +1494,16 @@ mod tests {
     }
 
     fn sample_petpack_license() -> PetpackLicense {
+        sample_petpack_license_for_account(DEVELOPMENT_ACCOUNT_ID)
+    }
+
+    fn sample_petpack_license_for_account(account_id: &str) -> PetpackLicense {
         PetpackLicense {
             license_id: "lic_test".to_string(),
             entitlement_id: "ent_test".to_string(),
             subject: LicenseSubject {
                 subject_type: "account".to_string(),
-                id: "user_test".to_string(),
+                id: account_id.to_string(),
             },
             pet_id: "chimmy".to_string(),
             pet_version: "1.0.0".to_string(),
@@ -1488,8 +1514,17 @@ mod tests {
     }
 
     fn write_v2_metadata(dir: &Path, idle_hash: &str, active_hash: &str) {
+        write_v2_metadata_for_account(dir, idle_hash, active_hash, DEVELOPMENT_ACCOUNT_ID);
+    }
+
+    fn write_v2_metadata_for_account(
+        dir: &Path,
+        idle_hash: &str,
+        active_hash: &str,
+        account_id: &str,
+    ) {
         let petpack = sample_petpack_metadata(idle_hash, active_hash);
-        let license = sample_petpack_license();
+        let license = sample_petpack_license_for_account(account_id);
         fs::write(
             dir.join(PETPACK_METADATA_FILE),
             serde_json::to_string_pretty(&petpack).expect("serialize petpack metadata"),
@@ -1610,6 +1645,27 @@ mod tests {
             Err("petpack signature verification failed".to_string())
         );
     }
+
+    #[test]
+    fn petpack_v2_rejects_other_account_license() {
+        let dir = test_dir("other-account");
+        let manifest = base_manifest();
+        let (idle_digest, active_digest) = write_test_assets(&dir);
+        write_v2_metadata_for_account(
+            &dir,
+            &encode_hex(&idle_digest),
+            &encode_hex(&active_digest),
+            "other_user",
+        );
+
+        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest);
+
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(
+            result,
+            Err("petpack license belongs to another account".to_string())
+        );
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1646,6 +1702,7 @@ pub fn run() {
             set_pet_opacity,
             get_activity_stats,
             get_app_state,
+            get_current_account,
             get_installed_pet_catalog,
             set_activity_tracking_enabled,
             import_pet_from_folder,

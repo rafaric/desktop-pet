@@ -132,6 +132,25 @@ h2 {
 	margin-top: 2rem;
 }
 
+.account-card {
+	display: grid;
+	gap: 6px;
+	margin-top: 18px;
+	padding: 18px 20px;
+	border: 1px solid rgba(64, 48, 31, 0.12);
+	border-radius: 20px;
+	background: rgba(255, 255, 255, 0.58);
+}
+
+.account-card strong {
+	font-size: 1rem;
+}
+
+.account-card span {
+	color: #66746d;
+	font-size: 0.92rem;
+}
+
 .import-card {
 	display: grid;
 	gap: 16px;
