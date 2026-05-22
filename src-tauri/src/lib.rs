@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use rdev::{listen, Event, EventType};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -33,6 +34,10 @@ const PETPACK_METADATA_FILE: &str = "petpack.json";
 const PETPACK_LICENSE_FILE: &str = "license.json";
 const PETPACK_SIGNATURE_FILE: &str = "signature.ed25519";
 const PETPACK_MANIFEST_FILE: &str = "manifest.json";
+const PETPACK_PUBLIC_KEY_BYTES: [u8; 32] = [
+    0xd7, 0x5a, 0x98, 0x01, 0x82, 0xb1, 0x0a, 0xb7, 0xd5, 0x4b, 0xfe, 0xd3, 0xc9, 0x64, 0x07, 0x3a,
+    0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a,
+];
 const DEFAULT_SKIN_ID: &str = "default";
 const DEMO_SKINS: &[(&str, u64)] = &[("default", 0), ("mint", 25), ("berry", 50), ("night", 100)];
 
@@ -431,6 +436,26 @@ fn canonical_signature_payload(
     serde_json_canonicalizer::to_vec(&payload).map_err(|error| error.to_string())
 }
 
+fn verify_petpack_signature(
+    canonical_payload: &[u8],
+    signature_path: &Path,
+    public_key_bytes: &[u8; 32],
+) -> Result<(), String> {
+    let signature_content =
+        fs::read_to_string(signature_path).map_err(|error| error.to_string())?;
+    let signature_bytes = BASE64_STANDARD
+        .decode(signature_content.trim())
+        .map_err(|_| "petpack signature is not valid base64".to_string())?;
+    let signature = Signature::try_from(signature_bytes.as_slice())
+        .map_err(|_| "petpack signature has invalid length".to_string())?;
+    let verifying_key = VerifyingKey::from_bytes(public_key_bytes)
+        .map_err(|_| "embedded petpack public key is invalid".to_string())?;
+
+    verifying_key
+        .verify(canonical_payload, &signature)
+        .map_err(|_| "petpack signature verification failed".to_string())
+}
+
 fn collect_named_file_dirs(
     root: &Path,
     file_name: &str,
@@ -502,7 +527,12 @@ fn validate_petpack_v2_metadata(
 
     let petpack = read_json_file::<PetpackMetadata>(&petpack_path)?;
     let license = read_json_file::<PetpackLicense>(&license_path)?;
-    let _canonical_payload = canonical_signature_payload(&petpack, &license)?;
+    let canonical_payload = canonical_signature_payload(&petpack, &license)?;
+    verify_petpack_signature(
+        &canonical_payload,
+        &signature_path,
+        &PETPACK_PUBLIC_KEY_BYTES,
+    )?;
 
     if petpack.schema_version != 2 {
         return Err("unsupported petpack schema version".to_string());
@@ -1373,6 +1403,13 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ed25519_dalek::{Signer, SigningKey};
+
+    const PETPACK_TEST_SECRET_KEY_BYTES: [u8; 32] = [
+        0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c,
+        0xc4, 0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae,
+        0x7f, 0x60,
+    ];
 
     fn test_dir(name: &str) -> PathBuf {
         let millis = SystemTime::now()
@@ -1451,41 +1488,27 @@ mod tests {
     }
 
     fn write_v2_metadata(dir: &Path, idle_hash: &str, active_hash: &str) {
+        let petpack = sample_petpack_metadata(idle_hash, active_hash);
+        let license = sample_petpack_license();
         fs::write(
             dir.join(PETPACK_METADATA_FILE),
-            format!(
-                r#"{{
-  "schemaVersion": 2,
-  "packageId": "petpack_chimmy_1_0_0",
-  "petId": "chimmy",
-  "petVersion": "1.0.0",
-  "minimumAppVersion": "0.1.0",
-  "manifestPath": "manifest.json",
-  "licensePath": "license.json",
-  "assets": [
-    {{ "path": "assets/idle.png", "sha256": "{idle_hash}" }},
-    {{ "path": "assets/active.png", "sha256": "{active_hash}" }}
-  ]
-}}"#,
-            ),
+            serde_json::to_string_pretty(&petpack).expect("serialize petpack metadata"),
         )
         .expect("write petpack metadata");
         fs::write(
             dir.join(PETPACK_LICENSE_FILE),
-            r#"{
-  "licenseId": "lic_test",
-  "entitlementId": "ent_test",
-  "subject": { "type": "account", "id": "user_test" },
-  "petId": "chimmy",
-  "petVersion": "1.0.0",
-  "issuedAt": "2026-05-22T00:00:00Z",
-  "expiresAt": null,
-  "revalidateAfter": null
-}"#,
+            serde_json::to_string_pretty(&license).expect("serialize license metadata"),
         )
         .expect("write license metadata");
-        fs::write(dir.join(PETPACK_SIGNATURE_FILE), "placeholder-signature")
-            .expect("write signature");
+
+        let canonical_payload = canonical_signature_payload(&petpack, &license).expect("payload");
+        let signing_key = SigningKey::from_bytes(&PETPACK_TEST_SECRET_KEY_BYTES);
+        let signature = signing_key.sign(&canonical_payload);
+        fs::write(
+            dir.join(PETPACK_SIGNATURE_FILE),
+            BASE64_STANDARD.encode(signature.to_bytes()),
+        )
+        .expect("write signature");
     }
 
     #[test]
@@ -1565,6 +1588,27 @@ mod tests {
 
         let _ = fs::remove_dir_all(&dir);
         assert_eq!(result, Err("petpack asset hash mismatch".to_string()));
+    }
+
+    #[test]
+    fn petpack_v2_rejects_invalid_signature() {
+        let dir = test_dir("invalid-signature");
+        let manifest = base_manifest();
+        let (idle_digest, active_digest) = write_test_assets(&dir);
+        write_v2_metadata(&dir, &encode_hex(&idle_digest), &encode_hex(&active_digest));
+        fs::write(
+            dir.join(PETPACK_SIGNATURE_FILE),
+            BASE64_STANDARD.encode([0_u8; 64]),
+        )
+        .expect("overwrite signature");
+
+        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest);
+
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(
+            result,
+            Err("petpack signature verification failed".to_string())
+        );
     }
 }
 
