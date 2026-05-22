@@ -787,9 +787,11 @@ dependencies = [
 name = "desktop-pet"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "rdev",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

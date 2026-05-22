@@ -1,5 +1,7 @@
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use rdev::{listen, Event, EventType};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -398,6 +400,25 @@ fn read_json_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, String
     serde_json::from_str::<T>(&content).map_err(|error| error.to_string())
 }
 
+fn sha256_digest(path: &Path) -> Result<[u8; 32], String> {
+    let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut hasher = Sha256::new();
+    io::copy(&mut file, &mut hasher).map_err(|error| error.to_string())?;
+    Ok(hasher.finalize().into())
+}
+
+fn encode_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn digest_matches_declared(digest: &[u8], declared: &str) -> bool {
+    let declared = declared.trim();
+    encode_hex(digest).eq_ignore_ascii_case(declared)
+        || BASE64_STANDARD
+            .decode(declared)
+            .is_ok_and(|decoded| decoded == digest)
+}
+
 fn collect_named_file_dirs(
     root: &Path,
     file_name: &str,
@@ -517,7 +538,11 @@ fn validate_petpack_v2_metadata(
         if asset.path.trim().is_empty() || asset.sha256.trim().is_empty() {
             return Err("petpack asset metadata is invalid".to_string());
         }
-        asset_path_within(manifest_dir, &asset.path)?;
+        let asset_path = asset_path_within(manifest_dir, &asset.path)?;
+        let digest = sha256_digest(&asset_path)?;
+        if !digest_matches_declared(&digest, &asset.sha256) {
+            return Err("petpack asset hash mismatch".to_string());
+        }
         declared_assets.insert(asset.path.clone());
     }
 
@@ -1330,6 +1355,152 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
         .build(app)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_dir(name: &str) -> PathBuf {
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_millis();
+        let dir = std::env::temp_dir().join(format!("desktop-pet-{name}-{millis}"));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    fn base_manifest() -> PetManifest {
+        PetManifest {
+            id: "chimmy".to_string(),
+            name: "Chimmy".to_string(),
+            status: "Descargada".to_string(),
+            description: "Test pet".to_string(),
+            preview_frame: "assets/idle.png".to_string(),
+            idle_frame: "assets/idle.png".to_string(),
+            active_frames: vec!["assets/active.png".to_string()],
+            supports_skins: false,
+            skins: vec![],
+            source: None,
+        }
+    }
+
+    fn write_test_assets(dir: &Path) -> ([u8; 32], [u8; 32]) {
+        let assets_dir = dir.join("assets");
+        fs::create_dir_all(&assets_dir).expect("create assets dir");
+        let idle_path = assets_dir.join("idle.png");
+        let active_path = assets_dir.join("active.png");
+        fs::write(&idle_path, b"idle image bytes").expect("write idle");
+        fs::write(&active_path, b"active image bytes").expect("write active");
+        (
+            sha256_digest(&idle_path).expect("idle digest"),
+            sha256_digest(&active_path).expect("active digest"),
+        )
+    }
+
+    fn write_v2_metadata(dir: &Path, idle_hash: &str, active_hash: &str) {
+        fs::write(
+            dir.join(PETPACK_METADATA_FILE),
+            format!(
+                r#"{{
+  "schemaVersion": 2,
+  "packageId": "petpack_chimmy_1_0_0",
+  "petId": "chimmy",
+  "petVersion": "1.0.0",
+  "minimumAppVersion": "0.1.0",
+  "manifestPath": "manifest.json",
+  "licensePath": "license.json",
+  "assets": [
+    {{ "path": "assets/idle.png", "sha256": "{idle_hash}" }},
+    {{ "path": "assets/active.png", "sha256": "{active_hash}" }}
+  ]
+}}"#,
+            ),
+        )
+        .expect("write petpack metadata");
+        fs::write(
+            dir.join(PETPACK_LICENSE_FILE),
+            r#"{
+  "licenseId": "lic_test",
+  "entitlementId": "ent_test",
+  "subject": { "type": "account", "id": "user_test" },
+  "petId": "chimmy",
+  "petVersion": "1.0.0",
+  "issuedAt": "2026-05-22T00:00:00Z",
+  "expiresAt": null,
+  "revalidateAfter": null
+}"#,
+        )
+        .expect("write license metadata");
+        fs::write(dir.join(PETPACK_SIGNATURE_FILE), "placeholder-signature")
+            .expect("write signature");
+    }
+
+    #[test]
+    fn digest_matches_hex_and_base64() {
+        let digest = [0xde, 0xad, 0xbe, 0xef];
+        assert!(digest_matches_declared(&digest, "DEADBEEF"));
+        assert!(digest_matches_declared(
+            &digest,
+            &BASE64_STANDARD.encode(digest)
+        ));
+        assert!(!digest_matches_declared(&digest, "00000000"));
+    }
+
+    #[test]
+    fn petpack_v1_without_metadata_skips_hash_validation() {
+        let dir = test_dir("v1-fallback");
+        let manifest = base_manifest();
+
+        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest);
+
+        let _ = fs::remove_dir_all(&dir);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn petpack_v2_accepts_hex_asset_hashes() {
+        let dir = test_dir("hex-hashes");
+        let manifest = base_manifest();
+        let (idle_digest, active_digest) = write_test_assets(&dir);
+        write_v2_metadata(&dir, &encode_hex(&idle_digest), &encode_hex(&active_digest));
+
+        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest);
+
+        let _ = fs::remove_dir_all(&dir);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn petpack_v2_accepts_base64_asset_hashes() {
+        let dir = test_dir("base64-hashes");
+        let manifest = base_manifest();
+        let (idle_digest, active_digest) = write_test_assets(&dir);
+        write_v2_metadata(
+            &dir,
+            &BASE64_STANDARD.encode(idle_digest),
+            &BASE64_STANDARD.encode(active_digest),
+        );
+
+        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest);
+
+        let _ = fs::remove_dir_all(&dir);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn petpack_v2_rejects_asset_hash_mismatch() {
+        let dir = test_dir("hash-mismatch");
+        let manifest = base_manifest();
+        let (idle_digest, _) = write_test_assets(&dir);
+        write_v2_metadata(&dir, &encode_hex(&idle_digest), "00000000");
+
+        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest);
+
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(result, Err("petpack asset hash mismatch".to_string()));
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
