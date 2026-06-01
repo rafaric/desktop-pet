@@ -102,6 +102,45 @@ function getCollidingPetId(error: unknown) {
 		: null;
 }
 
+function friendlyImportError(error: unknown) {
+	const message = String(error);
+
+	if (message.includes("petpack license belongs to another account")) {
+		return "Este petpack pertenece a otra cuenta.";
+	}
+	if (message.includes("petpack asset hash mismatch")) {
+		return "Este petpack parece estar dañado o modificado.";
+	}
+	if (message.includes("petpack signature verification failed")) {
+		return "No se pudo verificar la firma del petpack.";
+	}
+	if (message.includes("petpack signature is not valid base64")) {
+		return "La firma del petpack tiene un formato inválido.";
+	}
+	if (message.includes("commercial petpack metadata is incomplete")) {
+		return "Este petpack no tiene toda la metadata comercial requerida.";
+	}
+	if (
+		message.includes("petpack metadata does not declare all runtime assets")
+	) {
+		return "Este petpack no declara todos los assets que usa la mascota.";
+	}
+	if (message.includes("petpack contains an unsafe path")) {
+		return "Este petpack contiene rutas inseguras.";
+	}
+	if (message.includes("petpack contains too many files")) {
+		return "Este petpack contiene demasiados archivos.";
+	}
+	if (message.includes("petpack contains a file that is too large")) {
+		return "Este petpack contiene un archivo demasiado grande.";
+	}
+	if (message.includes("petpack is too large")) {
+		return "Este petpack es demasiado grande.";
+	}
+
+	return message;
+}
+
 const defaultPetCatalog: PetManifest[] = [
 	{
 		id: demoPetId,
@@ -485,8 +524,8 @@ function MainWindow() {
 				return;
 			}
 
-			const message = String(error);
-			setStatus(`Command failed: ${message}`);
+			const message = friendlyImportError(error);
+			setStatus(`Command failed: ${String(error)}`);
 			setImportFeedback({
 				kind: "error",
 				message: `No se pudo importar: ${message}`,
@@ -541,8 +580,8 @@ function MainWindow() {
 				return;
 			}
 
-			const message = String(error);
-			setStatus(`Command failed: ${message}`);
+			const message = friendlyImportError(error);
+			setStatus(`Command failed: ${String(error)}`);
 			setImportFeedback({
 				kind: "error",
 				message: `No se pudo importar el petpack: ${message}`,
