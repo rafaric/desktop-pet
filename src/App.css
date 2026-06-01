@@ -173,6 +173,28 @@ h2 {
 	align-items: center;
 }
 
+.import-collision {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 14px;
+	align-items: center;
+	justify-content: space-between;
+	padding: 1rem;
+	border: 1px solid rgba(188, 113, 37, 0.35);
+	border-radius: 18px;
+	background: rgba(255, 220, 168, 0.42);
+}
+
+.import-collision p {
+	margin: 0.25rem 0 0;
+	color: #7c5d35;
+}
+
+.import-collision-actions {
+	display: flex;
+	gap: 10px;
+}
+
 .import-feedback {
 	margin: 0;
 	padding: 0.9rem 1rem;

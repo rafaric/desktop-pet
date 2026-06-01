@@ -26,3 +26,5 @@ tmp
 *.njsproj
 *.sln
 *.sw?
+# Local Pi runtime state
+.atl/

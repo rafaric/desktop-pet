@@ -90,6 +90,11 @@ const devImportsEnabled =
 	import.meta.env.DEV ||
 	import.meta.env.VITE_DESKTOP_PET_DEV_IMPORTS === "true";
 
+type ImportCollision = {
+	kind: "folder" | "petpack";
+	petId: string;
+};
+
 function getCollidingPetId(error: unknown) {
 	const message = String(error);
 	return message.startsWith(petIdCollisionPrefix)
@@ -289,6 +294,8 @@ function MainWindow() {
 		kind: "error" | "success";
 		message: string;
 	} | null>(null);
+	const [importCollision, setImportCollision] =
+		useState<ImportCollision | null>(null);
 	const [activityStats, setActivityStats] =
 		useState<ActivityStats>(initialActivityStats);
 	const [skinState, setSkinState] = useState<SkinState>(initialSkinState);
@@ -447,6 +454,9 @@ function MainWindow() {
 
 	async function importPetFolder(overwriteExisting = false) {
 		setImportFeedback(null);
+		if (overwriteExisting) {
+			setImportCollision(null);
+		}
 
 		try {
 			if (!importPath.trim()) {
@@ -457,6 +467,7 @@ function MainWindow() {
 				folderPath: importPath,
 				overwriteExisting,
 			});
+			setImportCollision(null);
 			setPetLibrary(persisted.pets);
 			await refreshPetCatalog();
 			setStatus("Pet imported successfully.");
@@ -469,17 +480,8 @@ function MainWindow() {
 		} catch (error) {
 			const collidingPetId = getCollidingPetId(error);
 			if (collidingPetId) {
-				const shouldReplace = window.confirm(
-					`La mascota "${collidingPetId}" ya está instalada. ¿Querés reemplazarla?`,
-				);
-				if (shouldReplace) {
-					await importPetFolder(true);
-					return;
-				}
-				setImportFeedback({
-					kind: "error",
-					message: "Importación cancelada: la mascota ya estaba instalada.",
-				});
+				setImportCollision({ kind: "folder", petId: collidingPetId });
+				setImportFeedback(null);
 				return;
 			}
 
@@ -508,6 +510,9 @@ function MainWindow() {
 
 	async function importPetpackFile(overwriteExisting = false) {
 		setImportFeedback(null);
+		if (overwriteExisting) {
+			setImportCollision(null);
+		}
 
 		try {
 			if (!petpackPath.trim()) {
@@ -518,6 +523,7 @@ function MainWindow() {
 				filePath: petpackPath,
 				overwriteExisting,
 			});
+			setImportCollision(null);
 			setPetLibrary(persisted.pets);
 			await refreshPetCatalog();
 			setStatus("Petpack imported successfully.");
@@ -530,17 +536,8 @@ function MainWindow() {
 		} catch (error) {
 			const collidingPetId = getCollidingPetId(error);
 			if (collidingPetId) {
-				const shouldReplace = window.confirm(
-					`La mascota "${collidingPetId}" ya está instalada. ¿Querés reemplazarla?`,
-				);
-				if (shouldReplace) {
-					await importPetpackFile(true);
-					return;
-				}
-				setImportFeedback({
-					kind: "error",
-					message: "Importación cancelada: la mascota ya estaba instalada.",
-				});
+				setImportCollision({ kind: "petpack", petId: collidingPetId });
+				setImportFeedback(null);
 				return;
 			}
 
@@ -551,6 +548,27 @@ function MainWindow() {
 				message: `No se pudo importar el petpack: ${message}`,
 			});
 		}
+	}
+
+	async function confirmImportReplacement() {
+		if (!importCollision) {
+			return;
+		}
+
+		if (importCollision.kind === "folder") {
+			await importPetFolder(true);
+			return;
+		}
+
+		await importPetpackFile(true);
+	}
+
+	function cancelImportReplacement() {
+		setImportCollision(null);
+		setImportFeedback({
+			kind: "error",
+			message: "Importación cancelada: la mascota ya estaba instalada.",
+		});
 	}
 
 	async function pickPetpackFile() {
@@ -678,6 +696,28 @@ function MainWindow() {
 								</button>
 							</div>
 						</div>
+						{importCollision ? (
+							<div className="import-collision">
+								<div>
+									<strong>
+										La mascota "{importCollision.petId}" ya está instalada.
+									</strong>
+									<p>¿Querés reemplazarla con este import?</p>
+								</div>
+								<div className="import-collision-actions">
+									<button type="button" onClick={confirmImportReplacement}>
+										Reemplazar
+									</button>
+									<button
+										className="secondary"
+										type="button"
+										onClick={cancelImportReplacement}
+									>
+										Cancelar
+									</button>
+								</div>
+							</div>
+						) : null}
 						{importFeedback ? (
 							<p className={`import-feedback ${importFeedback.kind}`}>
 								{importFeedback.message}
