@@ -33,3 +33,6 @@ tmp
 .secrets/
 *.raw.hex
 *.pem
+*googleusercontent.com*.json
+oauth_config.json
+*client_secret*.json

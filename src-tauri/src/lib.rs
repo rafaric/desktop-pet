@@ -40,6 +40,9 @@ const PETPACK_PUBLIC_KEY_BYTES: [u8; 32] = [
 ];
 const DEVELOPMENT_ACCOUNT_ID: &str = "user_test";
 const DEVELOPMENT_ACCOUNT_EMAIL: &str = "user_test@example.com";
+const GOOGLE_CLIENT_ID: &str =
+    "271056612612-ruesqtv1e3h4a1t3qf0e7fp3u0sim3gg.apps.googleusercontent.com";
+const GOOGLE_CLIENT_SECRET: &str = "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";
 const DEFAULT_SKIN_ID: &str = "default";
 const DEMO_SKINS: &[(&str, u64)] = &[("default", 0), ("mint", 25), ("berry", 50), ("night", 100)];
 
@@ -158,11 +161,33 @@ struct PetpackLicense {
     revalidate_after: Option<String>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 struct AccountSession {
     id: String,
     email: String,
     display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    access_token: Option<String>,
+}
+
+impl Default for AccountSession {
+    fn default() -> Self {
+        Self {
+            id: DEVELOPMENT_ACCOUNT_ID.to_string(),
+            email: DEVELOPMENT_ACCOUNT_EMAIL.to_string(),
+            display_name: "Development User".to_string(),
+            access_token: None,
+        }
+    }
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+struct AccountState {
+    #[serde(default)]
+    account: AccountSession,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    id_token: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -208,6 +233,8 @@ struct PersistedState {
     skins: SkinState,
     #[serde(default)]
     pets: PetLibraryState,
+    #[serde(default)]
+    account: AccountState,
 }
 
 #[derive(Clone, Serialize)]
@@ -501,6 +528,7 @@ fn validate_petpack_v2_metadata(
     package_root: &Path,
     manifest_dir: &Path,
     manifest: &PetManifest,
+    account_id: &str,
 ) -> Result<(), String> {
     let petpack_dir = single_metadata_dir(package_root, PETPACK_METADATA_FILE)?;
     let license_dir = single_metadata_dir(package_root, PETPACK_LICENSE_FILE)?;
@@ -571,7 +599,7 @@ fn validate_petpack_v2_metadata(
         return Err("petpack license has invalid account metadata".to_string());
     }
 
-    if license.subject.id != DEVELOPMENT_ACCOUNT_ID {
+    if license.subject.id != account_id {
         return Err("petpack license belongs to another account".to_string());
     }
 
@@ -1006,12 +1034,23 @@ fn get_app_state(state: State<'_, AppState>) -> Result<PersistedState, String> {
 }
 
 #[tauri::command]
-fn get_current_account() -> AccountSession {
-    AccountSession {
-        id: DEVELOPMENT_ACCOUNT_ID.to_string(),
-        email: DEVELOPMENT_ACCOUNT_EMAIL.to_string(),
-        display_name: "Development User".to_string(),
-    }
+fn get_current_account(state: State<'_, AppState>) -> Result<AccountSession, String> {
+    let guard = state.inner.lock().map_err(|e| e.to_string())?;
+    Ok(guard.account.account.clone())
+}
+
+#[tauri::command]
+fn save_account_session(
+    state: State<'_, AppState>,
+    account: AccountSession,
+    id_token: Option<String>,
+) -> Result<AccountSession, String> {
+    set_authenticated_account(state.inner(), account, id_token)
+}
+
+#[tauri::command]
+fn clear_account_session(state: State<'_, AppState>) -> Result<(), String> {
+    clear_account(state.inner())
 }
 
 #[tauri::command]
@@ -1035,6 +1074,35 @@ fn get_installed_pet_catalog(app: AppHandle) -> Result<Vec<PetManifest>, String>
 
 fn pet_id_collision_error(pet_id: &str) -> String {
     format!("PET_ID_COLLISION:{pet_id}")
+}
+
+// ─── Google Auth helpers ───────────────────────────────────────────────────────
+
+fn current_account_id(state: &PersistedState) -> String {
+    state.account.account.id.clone()
+}
+
+fn set_authenticated_account(
+    app_state: &AppState,
+    account: AccountSession,
+    id_token: Option<String>,
+) -> Result<AccountSession, String> {
+    let mut guard = app_state.inner.lock().map_err(|e| e.to_string())?;
+    guard.account.account = account.clone();
+    guard.account.id_token = id_token;
+    let snapshot = guard.clone();
+    drop(guard);
+    save_persisted_state(app_state, &snapshot).map_err(|e| e.to_string())?;
+    Ok(account)
+}
+
+fn clear_account(app_state: &AppState) -> Result<(), String> {
+    let mut guard = app_state.inner.lock().map_err(|e| e.to_string())?;
+    guard.account = AccountState::default();
+    let snapshot = guard.clone();
+    drop(guard);
+    save_persisted_state(app_state, &snapshot).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn dev_imports_enabled() -> bool {
@@ -1071,7 +1139,12 @@ fn install_pet_from_directory(
     }
 
     validate_manifest_assets(source_dir, &manifest)?;
-    validate_petpack_v2_metadata(package_root, source_dir, &manifest)?;
+
+    let account_id = {
+        let guard = app_state.inner.lock().map_err(|e| e.to_string())?;
+        guard.account.account.id.clone()
+    };
+    validate_petpack_v2_metadata(package_root, source_dir, &manifest, &account_id)?;
 
     let pets_root = pets_install_dir(app)?;
     let install_dir = pets_root.join(&manifest.id);
@@ -1576,7 +1649,7 @@ mod tests {
         let dir = test_dir("v1-fallback");
         let manifest = base_manifest();
 
-        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest);
+        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest, DEVELOPMENT_ACCOUNT_ID);
 
         let _ = fs::remove_dir_all(&dir);
         assert!(result.is_ok());
@@ -1589,7 +1662,7 @@ mod tests {
         let (idle_digest, active_digest) = write_test_assets(&dir);
         write_v2_metadata(&dir, &encode_hex(&idle_digest), &encode_hex(&active_digest));
 
-        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest);
+        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest, DEVELOPMENT_ACCOUNT_ID);
 
         let _ = fs::remove_dir_all(&dir);
         assert!(result.is_ok());
@@ -1606,7 +1679,7 @@ mod tests {
             &BASE64_STANDARD.encode(active_digest),
         );
 
-        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest);
+        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest, DEVELOPMENT_ACCOUNT_ID);
 
         let _ = fs::remove_dir_all(&dir);
         assert!(result.is_ok());
@@ -1619,7 +1692,7 @@ mod tests {
         let (idle_digest, _) = write_test_assets(&dir);
         write_v2_metadata(&dir, &encode_hex(&idle_digest), "00000000");
 
-        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest);
+        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest, DEVELOPMENT_ACCOUNT_ID);
 
         let _ = fs::remove_dir_all(&dir);
         assert_eq!(result, Err("petpack asset hash mismatch".to_string()));
@@ -1637,7 +1710,7 @@ mod tests {
         )
         .expect("overwrite signature");
 
-        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest);
+        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest, DEVELOPMENT_ACCOUNT_ID);
 
         let _ = fs::remove_dir_all(&dir);
         assert_eq!(
@@ -1658,7 +1731,7 @@ mod tests {
             "other_user",
         );
 
-        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest);
+        let result = validate_petpack_v2_metadata(&dir, &dir, &manifest, DEVELOPMENT_ACCOUNT_ID);
 
         let _ = fs::remove_dir_all(&dir);
         assert_eq!(
@@ -1673,6 +1746,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_google_auth::init())
         .setup(|app| {
             let store_path = app_state_path(app)
                 .map_err(|error| tauri::Error::Io(std::io::Error::other(error)))?;
@@ -1703,6 +1777,8 @@ pub fn run() {
             get_activity_stats,
             get_app_state,
             get_current_account,
+            save_account_session,
+            clear_account_session,
             get_installed_pet_catalog,
             set_activity_tracking_enabled,
             import_pet_from_folder,

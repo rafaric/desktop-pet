@@ -37,6 +37,7 @@ type AccountSession = {
 	id: string;
 	email: string;
 	display_name: string;
+	access_token?: string;
 };
 
 type PersistedState = {
@@ -44,6 +45,10 @@ type PersistedState = {
 	settings: PetSettings;
 	skins: SkinState;
 	pets: PetLibraryState;
+	account: {
+		account: AccountSession;
+		id_token?: string;
+	};
 };
 
 type ActivityEventPayload = {
@@ -366,6 +371,7 @@ function MainWindow() {
 			setPosition(persisted.settings.position);
 			setSize(persisted.settings.size);
 			setOpacity(persisted.settings.opacity);
+			setCurrentAccount(persisted.account.account);
 		});
 
 		const unlistenStats = listen<ActivityStats>(
@@ -468,6 +474,74 @@ function MainWindow() {
 				enabled ? "Activity tracking enabled." : "Activity tracking paused.",
 			);
 		});
+	}
+
+	async function handleGoogleLogin() {
+		setStatus("Connecting with Google...");
+		setImportFeedback(null);
+		try {
+			const { signIn } = await import(
+				"@choochmeque/tauri-plugin-google-auth-api"
+			);
+			const response = await signIn({
+				clientId:
+					"271056612612-ruesqtv1e3h4a1t3qf0e7fp3u0sim3gg.apps.googleusercontent.com",
+				clientSecret: "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",
+				scopes: ["openid", "email", "profile"],
+			});
+
+			// Decode ID token to get user info
+			let userInfo = { sub: "", email: "", name: "" };
+			if (response.idToken) {
+				const payload = response.idToken.split(".")[1];
+				const decoded = JSON.parse(
+					atob(payload.replace(/-/g, "+").replace(/_/g, "/")),
+				);
+				userInfo = {
+					sub: decoded.sub ?? "",
+					email: decoded.email ?? "",
+					name: decoded.name ?? "",
+				};
+			}
+
+			const account: AccountSession = {
+				id: userInfo.sub || developmentAccountId,
+				email: userInfo.email || developmentAccountId,
+				display_name: userInfo.name || "Google User",
+				access_token: response.accessToken,
+			};
+
+			setCurrentAccount(account);
+			await invoke("save_account_session", {
+				account,
+				idToken: response.idToken ?? null,
+			});
+			setStatus(`Logged in as ${account.display_name}`);
+		} catch (error) {
+			setStatus(`Login failed: ${error}`);
+			setImportFeedback({
+				kind: "error",
+				message: `No se pudo iniciar sesión: ${String(error)}`,
+			});
+		}
+	}
+
+	async function handleGoogleLogout() {
+		try {
+			const { signOut } = await import(
+				"@choochmeque/tauri-plugin-google-auth-api"
+			);
+			if (currentAccount.access_token) {
+				await signOut({ accessToken: currentAccount.access_token });
+			} else {
+				await signOut();
+			}
+		} catch {
+			// ignore signOut errors
+		}
+		setCurrentAccount(initialAccountSession);
+		await invoke("clear_account_session");
+		setStatus("Logged out.");
 	}
 
 	const activePetId = petLibrary.active_pet_id;
@@ -678,11 +752,30 @@ function MainWindow() {
 				</div>
 
 				<div className="account-card">
-					<p className="eyebrow">Cuenta · desarrollo</p>
+					<p className="eyebrow">
+						{currentAccount.id === developmentAccountId
+							? "Cuenta · desarrollo"
+							: "Cuenta"}
+					</p>
 					<strong>{currentAccount.display_name}</strong>
 					<span>
 						{currentAccount.email} · license subject: {currentAccount.id}
 					</span>
+					<div className="account-actions">
+						{currentAccount.id === developmentAccountId ? (
+							<button type="button" onClick={handleGoogleLogin}>
+								Iniciar sesión con Google
+							</button>
+						) : (
+							<button
+								className="secondary"
+								type="button"
+								onClick={handleGoogleLogout}
+							>
+								Cerrar sesión
+							</button>
+						)}
+					</div>
 				</div>
 
 				{devImportsEnabled ? (
