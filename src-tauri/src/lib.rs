@@ -1418,6 +1418,11 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
 
     TrayIconBuilder::new()
         .tooltip("Desktop Pet")
+        .icon(
+            app.default_window_icon()
+                .cloned()
+                .unwrap_or_else(|| tauri::include_image!("icons/32x32.png").to_owned()),
+        )
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_tray_icon_event(|tray, event| {
@@ -1432,6 +1437,18 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
                     if window.is_visible().unwrap_or(false) {
                         let _ = window.hide();
                     } else {
+                        // Position on the right edge of the primary monitor
+                        if let Ok(Some(monitor)) = window.primary_monitor() {
+                            let screen = monitor.size();
+                            let scale = monitor.scale_factor();
+                            let win_size =
+                                window.outer_size().unwrap_or(PhysicalSize::new(380, 680));
+                            let x = (screen.width as f64 / scale - win_size.width as f64 / scale)
+                                as i32;
+                            let y = 0_i32;
+                            let _ = window
+                                .set_position(PhysicalPosition::new((x as f64 * scale) as i32, y));
+                        }
                         let _ = window.show();
                         let _ = window.set_focus();
                     }
@@ -1776,6 +1793,18 @@ pub fn run() {
 
             create_pet_window(app)?;
             create_tray(app)?;
+
+            // Hide main window on close instead of destroying it
+            let main_window = app
+                .get_webview_window("main")
+                .ok_or_else(|| tauri::Error::Io(std::io::Error::other("main window not found")))?;
+            let main_window_clone = main_window.clone();
+            main_window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = main_window_clone.hide();
+                }
+            });
 
             if persisted.activity.pet_active {
                 let handle = app.handle().clone();
