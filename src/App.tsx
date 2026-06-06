@@ -730,12 +730,11 @@ function MainWindow() {
 	return (
 		<main className="main-shell">
 			<section className="hero-card">
-				<p className="eyebrow">PoC 3</p>
-				<h1>Local Pet Library</h1>
+				<p className="eyebrow">Desktop Pet</p>
+				<h1>Tu compañero de escritorio</h1>
 				<p className="summary">
-					La app ahora carga mascotas desde manifests locales compatibles con
-					petpack. La demo sigue embebida, pero la estructura ya no depende de
-					assets hardcodeados en la UI.
+					Siempre está ahí, aunque no lo estés mirando. Instalá mascotas desde
+					la tienda, usalas offline, y cambiá su look cuando tengas ganas.
 				</p>
 
 				<div className="primary-actions">
@@ -754,17 +753,19 @@ function MainWindow() {
 				<div className="account-card">
 					<p className="eyebrow">
 						{currentAccount.id === developmentAccountId
-							? "Cuenta · desarrollo"
-							: "Cuenta"}
+							? "Cuenta · sin sesión"
+							: "Tu cuenta"}
 					</p>
 					<strong>{currentAccount.display_name}</strong>
 					<span>
-						{currentAccount.email} · license subject: {currentAccount.id}
+						{currentAccount.id === developmentAccountId
+							? "Iniciá sesión para instalar mascotas desde la tienda."
+							: currentAccount.email}
 					</span>
 					<div className="account-actions">
 						{currentAccount.id === developmentAccountId ? (
 							<button type="button" onClick={handleGoogleLogin}>
-								Iniciar sesión con Google
+								Entrar con Google
 							</button>
 						) : (
 							<button
@@ -772,7 +773,7 @@ function MainWindow() {
 								type="button"
 								onClick={handleGoogleLogout}
 							>
-								Cerrar sesión
+								Salir
 							</button>
 						)}
 					</div>
@@ -781,11 +782,11 @@ function MainWindow() {
 				{devImportsEnabled ? (
 					<div className="import-card">
 						<div>
-							<p className="eyebrow">Importar · desarrollo</p>
-							<h2>Instalar desde carpeta o petpack dev</h2>
+							<p className="eyebrow">Modo desarrollador</p>
+							<h2>Instalar mascota local</h2>
 							<p>
-								Estos imports son sólo para desarrollo. En producción, la app
-								debe aceptar únicamente petpacks firmados/licenciados.
+								Importá desde una carpeta local o un archivo .petpack de prueba.
+								Solo disponible en modo desarrollo.
 							</p>
 						</div>
 						<div className="import-group">
@@ -804,7 +805,7 @@ function MainWindow() {
 									Elegir carpeta
 								</button>
 								<button type="button" onClick={() => importPetFolder()}>
-									Importar carpeta
+									Instalar
 								</button>
 							</div>
 							<div className="import-row">
@@ -821,10 +822,10 @@ function MainWindow() {
 									type="button"
 									onClick={pickPetpackFile}
 								>
-									Elegir petpack
+									Elegir .petpack
 								</button>
 								<button type="button" onClick={() => importPetpackFile()}>
-									Importar petpack
+									Instalar
 								</button>
 							</div>
 						</div>
@@ -861,11 +862,11 @@ function MainWindow() {
 
 			<section className="pet-library-card">
 				<div className="section-heading">
-					<p className="eyebrow">Mascotas</p>
-					<h2>Biblioteca local</h2>
+					<p className="eyebrow">Tus mascotas</p>
+					<h2>Colección local</h2>
 					<p>
-						Cada mascota viene desde un `manifest.json`. Por ahora la demo está
-						disponible y las demás quedan preparadas para futuras descargas.
+						Las mascotas que instalaste viven acá. Elegí cuál querés que aprezca
+						en tu escritorio.
 					</p>
 				</div>
 				<div className="pet-library-grid">
@@ -993,12 +994,12 @@ function MainWindow() {
 
 			<section className="skins-card">
 				<div className="section-heading">
-					<p className="eyebrow">Skins</p>
-					<h2>Tienda local de skins</h2>
+					<p className="eyebrow">Estilos</p>
+					<h2>Cambiá el look</h2>
 					<p>
 						{activePetSupportsSkins
-							? `Skins de ${activePet.name}. La UI ya usa el manifest local; la lógica de compra sigue limitada a la demo pet en este prototipo.`
-							: `${activePet.name} no tiene skins habilitadas en esta versión del prototipo.`}
+							? `Desbloqueá estilos para ${activePet.name} usando tus puntos de actividad.`
+							: `${activePet.name} no tiene estilos alternativos todavía.`}
 					</p>
 				</div>
 				<div className="skins-grid">
@@ -1019,7 +1020,7 @@ function MainWindow() {
 									<h3>{skin.name}</h3>
 									<p>{skin.description}</p>
 									<span>
-										{unlocked ? "Desbloqueada" : `${skin.price} puntos`}
+										{unlocked ? "✓ Desbloqueado" : `${skin.price} pts`}
 									</span>
 								</div>
 								<button
@@ -1033,12 +1034,12 @@ function MainWindow() {
 									onClick={() => unlockOrUseSkin(skin)}
 								>
 									{active
-										? "En uso"
+										? "Usando"
 										: unlocked
-											? "Usar"
+											? "Aplicar"
 											: affordable
 												? "Desbloquear"
-												: "Faltan puntos"}
+												: "Necesitás más puntos"}
 								</button>
 							</article>
 						);
@@ -1048,14 +1049,14 @@ function MainWindow() {
 
 			<section className="privacy-card">
 				<div>
-					<h2>Privacidad de la PoC</h2>
+					<h2>Privacidad</h2>
 					<p>
-						Solo se guardan contadores numéricos locales. No guardamos texto,
-						teclas exactas, posición del cursor ni aplicaciones usadas.
+						Solo contamos clics y teclas — nunca qué teclas, ni qué escribiste,
+						ni qué apps usaste. Todo queda en tu computadora.
 					</p>
 					<p>
-						Estado: mascota {activityStats.pet_active ? "activa" : "oculta"} ·
-						tracking {activityStats.tracking_enabled ? "activo" : "pausado"}
+						Mascota {activityStats.pet_active ? "visible" : "oculta"} ·
+						actividad {activityStats.tracking_enabled ? "activa" : "pausada"}
 					</p>
 				</div>
 				<button
@@ -1064,8 +1065,8 @@ function MainWindow() {
 					onClick={() => updateTracking(!activityStats.tracking_enabled)}
 				>
 					{activityStats.tracking_enabled
-						? "Pausar tracking"
-						: "Activar tracking"}
+						? "Pausar actividad"
+						: "Reanudar actividad"}
 				</button>
 			</section>
 

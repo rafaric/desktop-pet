@@ -5,43 +5,46 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Desktop Pet Companion es una app de mascotas animadas para Windows y macOS, con tienda web y petpacks firmados para uso offline."
+      content="Desktop Pet es tu compañero de escritorio. Una mascota animada que vive en tu pantalla, reacciona mientras trabajás y se queda con vos offline."
     />
-    <meta property="og:title" content="Desktop Pet Companion" />
+    <meta
+      property="og:title"
+      content="Desktop Pet — Tu compañero de escritorio"
+    />
     <meta
       property="og:description"
-      content="Mascotas animadas coleccionables para tu escritorio. Compra en la web, instalación local y uso offline."
+      content="Mascotas animadas para Windows. Coleccionables, offline, sin suscripción."
     />
-    <title>Desktop Pet Companion</title>
+    <title>Desktop Pet — Tu compañero de escritorio</title>
     <link rel="stylesheet" href="./styles.css" />
     <script src="./store.js"></script>
   </head>
   <body>
     <header class="site-header">
-      <a class="brand" href="#top" aria-label="Desktop Pet Companion">
+      <a class="brand" href="#top" aria-label="Desktop Pet">
         <span class="brand-mark">🐾</span>
         <span>Desktop Pet</span>
       </a>
       <nav aria-label="Navegación principal">
         <a href="#download">Descargar</a>
-        <a href="#store">Tienda</a>
+        <a href="#store">Mascotas</a>
         <a href="#how-it-works">Cómo funciona</a>
       </nav>
-      <a class="login-link" href="#login-required">Ingresar</a>
+      <a class="login-link" href="#store">Mi cuenta</a>
     </header>
 
     <main id="top">
       <section class="hero-section">
         <div class="hero-copy">
-          <p class="eyebrow">Compañero decorativo para escritorio</p>
-          <h1>Una mascota animada que vive en tu escritorio.</h1>
+          <p class="eyebrow">Compañero de escritorio</p>
+          <h1>Siempre está ahí, aunque no lo estés mirando.</h1>
           <p class="summary">
-            Desktop Pet Companion es una app liviana para Windows y macOS con
-            mascotas coleccionables, animaciones locales y uso offline después
-            de instalar cada pet.
+            Desktop Pet es una mascota animada que vive en tu pantalla. La
+            comprás una vez, la usás para siempre — sin internet, sin
+            suscripción.
           </p>
           <div class="hero-actions">
-            <a class="button primary" href="#download">Descargar app</a>
+            <a class="button primary" href="#download">Descargar gratis</a>
             <a class="button secondary" href="#store">Ver mascotas</a>
           </div>
         </div>
@@ -57,12 +60,11 @@
 
       <section class="panel" id="download">
         <div>
-          <p class="eyebrow">App de escritorio</p>
-          <h2>Descargá Desktop Pet Companion</h2>
+          <p class="eyebrow">Descargá la app</p>
+          <h2>Instalá Desktop Pet en tu computadora</h2>
           <p>
-            Descargá la app para Windows. macOS viene próximamente. Una vez
-            instalada, comprá mascotas en la tienda web e importalas como
-            archivos .petpack.
+            La app es gratuita. Una vez instalada, comprás las mascotas que
+            querés desde la tienda y las importás con un click.
           </p>
         </div>
         <div class="download-grid">
@@ -88,18 +90,18 @@
           </div>
           <div class="download-card placeholder" role="status">
             <strong>macOS</strong>
-            <span>Imagen .dmg notarizada · próximamente</span>
+            <span>Próximamente</span>
           </div>
         </div>
       </section>
 
       <section class="panel" id="store">
         <div class="section-heading">
-          <p class="eyebrow">Tienda</p>
-          <h2>Mascotas destacadas</h2>
+          <p class="eyebrow">Mascotas</p>
+          <h2>Elegí tu compañero</h2>
           <p>
-            Para descargar una mascota premium, el usuario debe iniciar sesión.
-            El servidor genera un petpack firmado y ligado a su cuenta.
+            Cada mascota es tuya para siempre. La descargás una vez y la usás
+            offline cuando quieras.
           </p>
           <div id="store-app"></div>
         </div>
@@ -107,7 +109,7 @@
           <article class="pet-card">
             <div class="pet-art">🐶</div>
             <h3>Chimmy</h3>
-            <p>Mascota alegre de prueba para validar petpacks comerciales.</p>
+            <p>Alegre y expresivo. Reacciona mientras trabajás.</p>
             <div class="pet-meta">
               <span>Premium</span>
               <strong>USD 2.99</strong>
@@ -115,50 +117,57 @@
           </article>
           <article class="pet-card muted">
             <div class="pet-art">🦊</div>
-            <h3>Fox</h3>
-            <p>Concept art para futura mascota con animaciones propias.</p>
+            <h3>Kero</h3>
+            <p>Tranquilo y curioso. Ideal para las noches de trabajo.</p>
             <div class="pet-meta">
               <span>Próximamente</span>
               <strong>—</strong>
             </div>
-            <span class="button small secondary disabled">Avisarme pronto</span>
+            <span class="button small secondary disabled">Avisarme</span>
           </article>
           <article class="pet-card muted">
             <div class="pet-art">🐱</div>
             <h3>Michi</h3>
-            <p>Placeholder para expandir catálogo y probar layout de tienda.</p>
+            <p>
+              Independiente a su manera, pero siempre aparece cuando menos lo
+              esperás.
+            </p>
             <div class="pet-meta">
               <span>Próximamente</span>
               <strong>—</strong>
             </div>
-            <span class="button small secondary disabled">Avisarme pronto</span>
+            <span class="button small secondary disabled">Avisarme</span>
           </article>
         </div>
       </section>
 
       <section class="flow-section" id="how-it-works">
-        <p class="eyebrow">Flujo comercial</p>
-        <h2>Compra en la web, uso offline en la app.</h2>
+        <p class="eyebrow">Cómo funciona</p>
+        <h2>Comprás una vez. Tuya para siempre.</h2>
         <div class="flow-grid">
           <div>
             <span>1</span>
-            <h3>Login</h3>
-            <p>El usuario inicia sesión en la tienda web.</p>
+            <h3>Descargá la app</h3>
+            <p>
+              Gratis para Windows. Instalación rápida, sin cuenta obligatoria.
+            </p>
           </div>
           <div>
             <span>2</span>
-            <h3>Entitlement</h3>
-            <p>La compra habilita la descarga de esa mascota.</p>
+            <h3>Elegí tu mascota</h3>
+            <p>Navegá la tienda e iniciá sesión con tu cuenta de Google.</p>
           </div>
           <div>
             <span>3</span>
-            <h3>Petpack firmado</h3>
-            <p>El backend genera un paquete ligado a la cuenta.</p>
+            <h3>Descargá el .petpack</h3>
+            <p>Recibís un archivo firmado, ligado a tu cuenta.</p>
           </div>
           <div>
             <span>4</span>
-            <h3>Instalación local</h3>
-            <p>La app valida firma/licencia y permite uso offline.</p>
+            <h3>Usala offline</h3>
+            <p>
+              Una vez instalada, tu mascota funciona sin internet para siempre.
+            </p>
           </div>
         </div>
       </section>
@@ -166,16 +175,17 @@
       <section class="panel" id="my-pets">
         <div class="section-heading">
           <p class="eyebrow">Mis mascotas</p>
-          <h2>Mascotas descargadas</h2>
+          <h2>Tus mascotas descargadas</h2>
         </div>
         <div id="owned-grid"></div>
       </section>
 
       <section class="notice" id="login-required">
-        <h2>Login requerido</h2>
+        <h2>¿Preguntas?</h2>
         <p>
-          Este skeleton todavía no conecta un proveedor de auth. La próxima fase
-          deberá definir sesión web, entitlements y generación de petpacks.
+          Escribinos a
+          <a href="mailto:hola@desktoppet.app">hola@desktoppet.app</a>. Estamos
+          armando más mascotas y queremos saber cuál querés ver primero.
         </p>
       </section>
     </main>
