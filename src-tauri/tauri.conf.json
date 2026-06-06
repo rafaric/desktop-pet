@@ -12,9 +12,13 @@
   "app": {
     "windows": [
       {
-        "title": "Desktop Pet Companion",
-        "width": 800,
-        "height": 600
+        "title": "Desktop Pet",
+        "width": 380,
+        "height": 680,
+        "resizable": false,
+        "decorations": true,
+        "visible": false,
+        "center": false
       }
     ],
     "security": {

@@ -350,6 +350,9 @@ function MainWindow() {
 		initialAccountSession,
 	);
 	const [lastActivity, setLastActivity] = useState<ActivityKind | null>(null);
+	const [activeTab, setActiveTab] = useState<
+		"pet" | "skins" | "stats" | "settings"
+	>("pet");
 
 	async function refreshPetCatalog() {
 		setPetCatalog(await loadLocalPetCatalog());
@@ -728,347 +731,330 @@ function MainWindow() {
 	}
 
 	return (
-		<main className="main-shell">
-			<section className="hero-card">
-				<p className="eyebrow">Desktop Pet</p>
-				<h1>Tu compañero de escritorio</h1>
-				<p className="summary">
-					Siempre está ahí, aunque no lo estés mirando. Instalá mascotas desde
-					la tienda, usalas offline, y cambiá su look cuando tengas ganas.
-				</p>
-
-				<div className="primary-actions">
-					<button type="button" onClick={showConfiguredPet}>
-						Mostrar mascota
-					</button>
-					<button
-						className="secondary"
-						type="button"
-						onClick={() => runSafely(() => runCommand("hide_pet"))}
-					>
-						Ocultar mascota
-					</button>
-				</div>
-
-				<div className="account-card">
-					<p className="eyebrow">
-						{currentAccount.id === developmentAccountId
-							? "Cuenta · sin sesión"
-							: "Tu cuenta"}
-					</p>
-					<strong>{currentAccount.display_name}</strong>
-					<span>
-						{currentAccount.id === developmentAccountId
-							? "Iniciá sesión para instalar mascotas desde la tienda."
-							: currentAccount.email}
-					</span>
-					<div className="account-actions">
-						{currentAccount.id === developmentAccountId ? (
-							<button type="button" onClick={handleGoogleLogin}>
-								Entrar con Google
-							</button>
-						) : (
-							<button
-								className="secondary"
-								type="button"
-								onClick={handleGoogleLogout}
-							>
-								Salir
-							</button>
-						)}
+		<main className="drawer-shell">
+			<header className="drawer-header">
+				<div className="drawer-pet-info">
+					<img
+						src={activePet.previewFrame}
+						alt={activePet.name}
+						className="drawer-pet-avatar"
+					/>
+					<div>
+						<strong>{activePet.name}</strong>
+						<span>{activityStats.points} puntos</span>
 					</div>
 				</div>
+				<div className="drawer-header-actions">
+					<button
+						type="button"
+						className="icon-btn"
+						title="Mostrar"
+						onClick={showConfiguredPet}
+					>
+						👁
+					</button>
+					<button
+						type="button"
+						className="icon-btn"
+						title="Ocultar"
+						onClick={() => runSafely(() => runCommand("hide_pet"))}
+					>
+						🫥
+					</button>
+				</div>
+			</header>
 
-				{devImportsEnabled ? (
-					<div className="import-card">
-						<div>
-							<p className="eyebrow">Modo desarrollador</p>
-							<h2>Instalar mascota local</h2>
-							<p>
-								Importá desde una carpeta local o un archivo .petpack de prueba.
-								Solo disponible en modo desarrollo.
-							</p>
+			<nav className="drawer-tabs">
+				{(["pet", "skins", "stats", "settings"] as const).map((tab) => (
+					<button
+						key={tab}
+						type="button"
+						className={`drawer-tab ${activeTab === tab ? "active" : ""}`}
+						onClick={() => setActiveTab(tab)}
+					>
+						{tab === "pet"
+							? "Mascotas"
+							: tab === "skins"
+								? "Estilos"
+								: tab === "stats"
+									? "Stats"
+									: "Ajustes"}
+					</button>
+				))}
+			</nav>
+
+			<div className="drawer-content">
+				{activeTab === "pet" && (
+					<>
+						<div className="pet-list">
+							{petCatalog.map((pet) => {
+								const downloaded = petLibrary.downloaded_pets.includes(pet.id);
+								const active = petLibrary.active_pet_id === pet.id;
+								return (
+									<div
+										key={pet.id}
+										className={`pet-row ${active ? "active" : ""}`}
+									>
+										<img src={pet.previewFrame} alt={pet.name} />
+										<div className="pet-row-info">
+											<strong>{pet.name}</strong>
+											<span>
+												{active
+													? "activa"
+													: downloaded
+														? "instalada"
+														: pet.status}
+											</span>
+										</div>
+										<button
+											className={active ? "active" : "secondary"}
+											disabled={active || !downloaded}
+											type="button"
+											onClick={() => usePet(pet.id)}
+										>
+											{active ? "✓" : downloaded ? "Usar" : "—"}
+										</button>
+									</div>
+								);
+							})}
 						</div>
-						<div className="import-group">
-							<div className="import-row">
-								<input
-									type="text"
-									value={importPath}
-									onChange={(event) => setImportPath(event.currentTarget.value)}
-									placeholder="C:\\mascotas\\mi-petpack"
-								/>
-								<button
-									className="secondary"
-									type="button"
-									onClick={pickPetFolder}
-								>
-									Elegir carpeta
-								</button>
-								<button type="button" onClick={() => importPetFolder()}>
-									Instalar
-								</button>
-							</div>
-							<div className="import-row">
-								<input
-									type="text"
-									value={petpackPath}
-									onChange={(event) =>
-										setPetpackPath(event.currentTarget.value)
-									}
-									placeholder="C:\\mascotas\\chimmy.petpack"
-								/>
-								<button
-									className="secondary"
-									type="button"
-									onClick={pickPetpackFile}
-								>
-									Elegir .petpack
-								</button>
-								<button type="button" onClick={() => importPetpackFile()}>
-									Instalar
-								</button>
-							</div>
-						</div>
-						{importCollision ? (
-							<div className="import-collision">
-								<div>
-									<strong>
-										La mascota "{importCollision.petId}" ya está instalada.
-									</strong>
-									<p>¿Querés reemplazarla con este import?</p>
-								</div>
-								<div className="import-collision-actions">
-									<button type="button" onClick={confirmImportReplacement}>
-										Reemplazar
-									</button>
+						{devImportsEnabled && (
+							<div className="dev-import">
+								<p className="eyebrow">Agregar mascota</p>
+								<div className="import-row">
+									<input
+										type="text"
+										value={importPath}
+										onChange={(e) => setImportPath(e.currentTarget.value)}
+										placeholder="Carpeta..."
+									/>
 									<button
 										className="secondary"
 										type="button"
-										onClick={cancelImportReplacement}
+										onClick={pickPetFolder}
 									>
-										Cancelar
+										📁
+									</button>
+									<button type="button" onClick={() => importPetFolder()}>
+										Instalar
 									</button>
 								</div>
-							</div>
-						) : null}
-						{importFeedback ? (
-							<p className={`import-feedback ${importFeedback.kind}`}>
-								{importFeedback.message}
-							</p>
-						) : null}
-					</div>
-				) : null}
-			</section>
-
-			<section className="pet-library-card">
-				<div className="section-heading">
-					<p className="eyebrow">Tus mascotas</p>
-					<h2>Colección local</h2>
-					<p>
-						Las mascotas que instalaste viven acá. Elegí cuál querés que aprezca
-						en tu escritorio.
-					</p>
-				</div>
-				<div className="pet-library-grid">
-					{petCatalog.map((pet) => {
-						const downloaded = petLibrary.downloaded_pets.includes(pet.id);
-						const active = petLibrary.active_pet_id === pet.id;
-
-						return (
-							<article
-								className={`pet-card ${active ? "active" : ""}`}
-								key={pet.id}
-							>
-								<div className="pet-preview">
-									<img src={pet.previewFrame} alt={`${pet.name} preview`} />
-								</div>
-								<div>
-									<h3>{pet.name}</h3>
-									<p>{pet.description}</p>
-									<span>{downloaded ? pet.status : "No descargada"}</span>
-								</div>
-								<button
-									className={active ? "active" : undefined}
-									disabled={active || !downloaded}
-									type="button"
-									onClick={() => usePet(pet.id)}
-								>
-									{active ? "Activa" : downloaded ? "Usar" : pet.status}
-								</button>
-							</article>
-						);
-					})}
-				</div>
-			</section>
-
-			<section className="stats-grid">
-				<div className="stat-card highlight">
-					<span>Puntos</span>
-					<strong>{activityStats.points}</strong>
-				</div>
-				<div className="stat-card">
-					<span>Clics</span>
-					<strong>{activityStats.mouse_clicks}</strong>
-				</div>
-				<div className="stat-card">
-					<span>Teclas</span>
-					<strong>{activityStats.key_presses}</strong>
-				</div>
-				<div className="stat-card">
-					<span>Última actividad</span>
-					<strong>
-						{lastActivity === "keyboard"
-							? "Teclado"
-							: lastActivity === "mouse"
-								? "Ratón"
-								: "—"}
-					</strong>
-				</div>
-			</section>
-
-			<section className="control-grid">
-				<div className="control-card">
-					<h2>Posición</h2>
-					<div className="button-grid two-columns">
-						<ControlButton
-							active={position === "top-left"}
-							onClick={() => updatePosition("top-left")}
-						>
-							Arriba izquierda
-						</ControlButton>
-						<ControlButton
-							active={position === "top-right"}
-							onClick={() => updatePosition("top-right")}
-						>
-							Arriba derecha
-						</ControlButton>
-						<ControlButton
-							active={position === "bottom-left"}
-							onClick={() => updatePosition("bottom-left")}
-						>
-							Abajo izquierda
-						</ControlButton>
-						<ControlButton
-							active={position === "bottom-right"}
-							onClick={() => updatePosition("bottom-right")}
-						>
-							Abajo derecha
-						</ControlButton>
-					</div>
-				</div>
-
-				<div className="control-card">
-					<h2>Tamaño</h2>
-					<div className="button-grid">
-						{(["small", "medium", "large"] as PetSize[]).map((value) => (
-							<ControlButton
-								key={value}
-								active={size === value}
-								onClick={() => updateSize(value)}
-							>
-								{value === "small"
-									? "Pequeño"
-									: value === "medium"
-										? "Mediano"
-										: "Grande"}
-							</ControlButton>
-						))}
-					</div>
-				</div>
-
-				<div className="control-card">
-					<h2>Opacidad</h2>
-					<div className="button-grid">
-						{[1, 0.75, 0.5].map((value) => (
-							<ControlButton
-								key={value}
-								active={opacity === value}
-								onClick={() => updateOpacity(value)}
-							>
-								{Math.round(value * 100)}%
-							</ControlButton>
-						))}
-					</div>
-				</div>
-			</section>
-
-			<section className="skins-card">
-				<div className="section-heading">
-					<p className="eyebrow">Estilos</p>
-					<h2>Cambiá el look</h2>
-					<p>
-						{activePetSupportsSkins
-							? `Desbloqueá estilos para ${activePet.name} usando tus puntos de actividad.`
-							: `${activePet.name} no tiene estilos alternativos todavía.`}
-					</p>
-				</div>
-				<div className="skins-grid">
-					{activePetSkins.map((skin) => {
-						const unlocked = isSkinUnlocked(skin.id);
-						const active = skinState.active_skin_id === skin.id;
-						const affordable = activityStats.points >= skin.price;
-
-						return (
-							<article className={`skin-card skin-${skin.id}`} key={skin.id}>
-								<div className="skin-preview">
-									<img
-										src={activePet.previewFrame}
-										alt={`${skin.name} skin preview`}
+								<div className="import-row">
+									<input
+										type="text"
+										value={petpackPath}
+										onChange={(e) => setPetpackPath(e.currentTarget.value)}
+										placeholder=".petpack..."
 									/>
+									<button
+										className="secondary"
+										type="button"
+										onClick={pickPetpackFile}
+									>
+										📦
+									</button>
+									<button type="button" onClick={() => importPetpackFile()}>
+										Instalar
+									</button>
 								</div>
-								<div>
-									<h3>{skin.name}</h3>
-									<p>{skin.description}</p>
-									<span>
-										{unlocked ? "✓ Desbloqueado" : `${skin.price} pts`}
-									</span>
-								</div>
-								<button
-									className={active ? "active" : undefined}
-									disabled={
-										!activePetSupportsSkins ||
-										active ||
-										(!unlocked && !affordable)
-									}
-									type="button"
-									onClick={() => unlockOrUseSkin(skin)}
-								>
-									{active
-										? "Usando"
-										: unlocked
-											? "Aplicar"
-											: affordable
-												? "Desbloquear"
-												: "Necesitás más puntos"}
-								</button>
-							</article>
-						);
-					})}
-				</div>
-			</section>
+								{importCollision && (
+									<div className="import-collision">
+										<div>
+											<strong>"{importCollision.petId}" ya instalada.</strong>
+											<p>¿Reemplazar?</p>
+										</div>
+										<div className="import-collision-actions">
+											<button type="button" onClick={confirmImportReplacement}>
+												Sí
+											</button>
+											<button
+												className="secondary"
+												type="button"
+												onClick={cancelImportReplacement}
+											>
+												No
+											</button>
+										</div>
+									</div>
+								)}
+								{importFeedback && (
+									<p className={`import-feedback ${importFeedback.kind}`}>
+										{importFeedback.message}
+									</p>
+								)}
+							</div>
+						)}
+					</>
+				)}
 
-			<section className="privacy-card">
-				<div>
-					<h2>Privacidad</h2>
-					<p>
-						Solo contamos clics y teclas — nunca qué teclas, ni qué escribiste,
-						ni qué apps usaste. Todo queda en tu computadora.
-					</p>
-					<p>
-						Mascota {activityStats.pet_active ? "visible" : "oculta"} ·
-						actividad {activityStats.tracking_enabled ? "activa" : "pausada"}
-					</p>
-				</div>
-				<button
-					className={activityStats.tracking_enabled ? "secondary" : undefined}
-					type="button"
-					onClick={() => updateTracking(!activityStats.tracking_enabled)}
-				>
-					{activityStats.tracking_enabled
-						? "Pausar actividad"
-						: "Reanudar actividad"}
-				</button>
-			</section>
+				{activeTab === "skins" && (
+					<div className="skins-list">
+						{!activePetSupportsSkins ? (
+							<p className="drawer-empty">
+								{activePet.name} no tiene estilos todavía.
+							</p>
+						) : (
+							activePetSkins.map((skin) => {
+								const unlocked = isSkinUnlocked(skin.id);
+								const active = skinState.active_skin_id === skin.id;
+								const affordable = activityStats.points >= skin.price;
+								return (
+									<div
+										key={skin.id}
+										className={`skin-row skin-${skin.id} ${active ? "active" : ""}`}
+									>
+										<img src={activePet.previewFrame} alt={skin.name} />
+										<div className="skin-row-info">
+											<strong>{skin.name}</strong>
+											<span>{unlocked ? "✓" : `${skin.price} pts`}</span>
+										</div>
+										<button
+											className={active ? "active" : "secondary"}
+											disabled={active || (!unlocked && !affordable)}
+											type="button"
+											onClick={() => unlockOrUseSkin(skin)}
+										>
+											{active
+												? "Usando"
+												: unlocked
+													? "Aplicar"
+													: affordable
+														? "Desbloquear"
+														: "Faltan pts"}
+										</button>
+									</div>
+								);
+							})
+						)}
+					</div>
+				)}
+
+				{activeTab === "stats" && (
+					<div className="stats-panel">
+						<div className="stat-big">
+							<span>Puntos</span>
+							<strong>{activityStats.points}</strong>
+						</div>
+						<div className="stats-row">
+							<div className="stat-item">
+								<span>Clics</span>
+								<strong>{activityStats.mouse_clicks}</strong>
+							</div>
+							<div className="stat-item">
+								<span>Teclas</span>
+								<strong>{activityStats.key_presses}</strong>
+							</div>
+							<div className="stat-item">
+								<span>Última</span>
+								<strong>
+									{lastActivity === "keyboard"
+										? "⌨️"
+										: lastActivity === "mouse"
+											? "🖱️"
+											: "—"}
+								</strong>
+							</div>
+						</div>
+					</div>
+				)}
+
+				{activeTab === "settings" && (
+					<div className="settings-panel">
+						<div className="settings-group">
+							<p className="settings-label">
+								{currentAccount.id === developmentAccountId
+									? "Sin sesión"
+									: "Tu cuenta"}
+							</p>
+							<strong>{currentAccount.display_name}</strong>
+							{currentAccount.id !== developmentAccountId && (
+								<span className="settings-sub">{currentAccount.email}</span>
+							)}
+							{currentAccount.id === developmentAccountId ? (
+								<button type="button" onClick={handleGoogleLogin}>
+									Entrar con Google
+								</button>
+							) : (
+								<button
+									className="secondary"
+									type="button"
+									onClick={handleGoogleLogout}
+								>
+									Salir
+								</button>
+							)}
+						</div>
+						<div className="settings-group">
+							<p className="settings-label">Posición</p>
+							<div className="button-grid two-columns">
+								{[
+									["top-left", "↖ Arriba izq"],
+									["top-right", "↗ Arriba der"],
+									["bottom-left", "↙ Abajo izq"],
+									["bottom-right", "↘ Abajo der"],
+								].map(([val, label]) => (
+									<ControlButton
+										key={val}
+										active={position === val}
+										onClick={() => updatePosition(val as typeof position)}
+									>
+										{label}
+									</ControlButton>
+								))}
+							</div>
+						</div>
+						<div className="settings-group">
+							<p className="settings-label">Tamaño</p>
+							<div className="button-grid">
+								{(["small", "medium", "large"] as PetSize[]).map((val) => (
+									<ControlButton
+										key={val}
+										active={size === val}
+										onClick={() => updateSize(val)}
+									>
+										{val === "small"
+											? "Pequeño"
+											: val === "medium"
+												? "Mediano"
+												: "Grande"}
+									</ControlButton>
+								))}
+							</div>
+						</div>
+						<div className="settings-group">
+							<p className="settings-label">Opacidad</p>
+							<div className="button-grid">
+								{[1, 0.75, 0.5].map((val) => (
+									<ControlButton
+										key={val}
+										active={opacity === val}
+										onClick={() => updateOpacity(val)}
+									>
+										{Math.round(val * 100)}%
+									</ControlButton>
+								))}
+							</div>
+						</div>
+						<div className="settings-group">
+							<p className="settings-label">Privacidad</p>
+							<span className="settings-sub">
+								Solo contamos clics y teclas. Todo queda en tu computadora.
+							</span>
+							<button
+								className={
+									activityStats.tracking_enabled ? "secondary" : undefined
+								}
+								type="button"
+								onClick={() => updateTracking(!activityStats.tracking_enabled)}
+							>
+								{activityStats.tracking_enabled
+									? "Pausar actividad"
+									: "Reanudar actividad"}
+							</button>
+						</div>
+					</div>
+				)}
+			</div>
 
 			<p className="status-line">{status}</p>
 		</main>
