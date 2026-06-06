@@ -40,9 +40,6 @@ const PETPACK_PUBLIC_KEY_BYTES: [u8; 32] = [
 ];
 const DEVELOPMENT_ACCOUNT_ID: &str = "user_test";
 const DEVELOPMENT_ACCOUNT_EMAIL: &str = "user_test@example.com";
-const GOOGLE_CLIENT_ID: &str =
-    "271056612612-ruesqtv1e3h4a1t3qf0e7fp3u0sim3gg.apps.googleusercontent.com";
-const GOOGLE_CLIENT_SECRET: &str = "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";
 const DEFAULT_SKIN_ID: &str = "default";
 const DEMO_SKINS: &[(&str, u64)] = &[("default", 0), ("mint", 25), ("berry", 50), ("night", 100)];
 

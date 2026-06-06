@@ -4,6 +4,8 @@ This tool creates a signed `.petpack` v2 archive from a local pet folder so the 
 
 ## Usage
 
+Before running the generator, set `DESKTOP_PET_SIGNING_SECRET_KEY_HEX` in your local environment. The value must be a 32-byte Ed25519 secret key encoded as 64 hex characters.
+
 From the repository root:
 
 ```bash
@@ -13,7 +15,7 @@ npm run petpack:dev -- <source_dir> <output.petpack> <account_id> [entitlement_i
 Example:
 
 ```bash
-npm run petpack:dev -- C:/proyectos/miMascota C:/proyectos/chimmy-v2.petpack user_test ent_chimmy lic_chimmy
+npm run petpack:dev -- ./public/pets/demo ./tmp/chimmy-v2.petpack user_test ent_chimmy lic_chimmy
 ```
 
 The source folder must contain:
@@ -54,7 +56,7 @@ signature.ed25519
 
 ## Keys
 
-This tool uses a real Ed25519 signing key. The matching public key is embedded in the desktop app.
+This tool reads the Ed25519 private signing key from the local environment. The matching public key is embedded in the desktop app.
 
 **Keep the signing key private.** For production, use server-side secrets management (env vars, HSM, Vault, etc.) and never commit the real private key to the repository.
 

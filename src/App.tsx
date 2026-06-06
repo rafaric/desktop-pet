@@ -94,6 +94,8 @@ const petIdCollisionPrefix = "PET_ID_COLLISION:";
 const devImportsEnabled =
 	import.meta.env.DEV ||
 	import.meta.env.VITE_DESKTOP_PET_DEV_IMPORTS === "true";
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim();
+const googleClientSecret = import.meta.env.VITE_GOOGLE_CLIENT_SECRET?.trim();
 
 type ImportCollision = {
 	kind: "folder" | "petpack";
@@ -482,14 +484,24 @@ function MainWindow() {
 	async function handleGoogleLogin() {
 		setStatus("Connecting with Google...");
 		setImportFeedback(null);
+
+		if (!googleClientId || !googleClientSecret) {
+			setStatus("Google OAuth is not configured.");
+			setImportFeedback({
+				kind: "error",
+				message:
+					"Falta configurar Google OAuth en el entorno local. Copiá las variables desde env.example.txt a tu .env.",
+			});
+			return;
+		}
+
 		try {
 			const { signIn } = await import(
 				"@choochmeque/tauri-plugin-google-auth-api"
 			);
 			const response = await signIn({
-				clientId:
-					"271056612612-ruesqtv1e3h4a1t3qf0e7fp3u0sim3gg.apps.googleusercontent.com",
-				clientSecret: "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",
+				clientId: googleClientId,
+				clientSecret: googleClientSecret,
 				scopes: ["openid", "email", "profile"],
 			});
 

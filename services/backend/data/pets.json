@@ -5,7 +5,7 @@
     "description": "Mascota premium de ejemplo. Animaciones suaves y personalidad adorable.",
     "price": 499,
     "imageUrl": "/images/chimmy-preview.png",
-    "sourceDir": "C:/proyectos/miMascota",
+    "sourceDir": "public/pets/demo",
     "version": "1.0.0"
   },
   {

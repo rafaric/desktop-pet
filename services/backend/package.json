@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "generate-petpack": "node generate-petpack.js"
+    "build:generator": "cargo build --manifest-path ../../src-tauri/Cargo.toml --bin generate_petpack"
   },
   "dependencies": {
     "cors": "^2.8.5",

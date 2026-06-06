@@ -10,6 +10,8 @@
     "tauri": "tauri",
     "web:dev": "vite web",
     "web:build": "vite build web --outDir ../dist-web --emptyOutDir",
+    "backend:dev": "npm --prefix services/backend run dev",
+    "backend:build:generator": "npm --prefix services/backend run build:generator",
     "petpack:dev": "cargo run --manifest-path src-tauri/Cargo.toml --bin generate_petpack --"
   },
   "dependencies": {

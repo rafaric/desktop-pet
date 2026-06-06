@@ -1,13 +1,35 @@
 import express from "express";
 import cors from "cors";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, isAbsolute } from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = join(__dirname, "..", "..");
 const DATA_DIR = join(__dirname, "data");
 const DOWNLOADS_DIR = join(DATA_DIR, "downloads");
+
+const generatorBinaryName =
+	process.platform === "win32" ? "generate_petpack.exe" : "generate_petpack";
+
+function resolveGeneratorBinary() {
+	if (process.env.PETPACK_GENERATOR_BIN) {
+		return process.env.PETPACK_GENERATOR_BIN;
+	}
+
+	const candidates = [
+		join(PROJECT_ROOT, "src-tauri", "target", "debug", generatorBinaryName),
+		join(PROJECT_ROOT, "src-tauri", "target", "release", generatorBinaryName),
+	];
+
+	return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
+
+function resolvePetSourceDir(sourceDir) {
+	if (!sourceDir) return null;
+	return isAbsolute(sourceDir) ? sourceDir : join(PROJECT_ROOT, sourceDir);
+}
 
 // Ensure directories exist
 if (!existsSync(DOWNLOADS_DIR)) mkdirSync(DOWNLOADS_DIR, { recursive: true });
@@ -112,37 +134,31 @@ app.post("/downloads/pets/:petId", async (req, res) => {
 			.json({ error: "You do not own this pet. Please purchase it first." });
 	}
 
-	if (!pet.sourceDir) {
+	const sourceDir = resolvePetSourceDir(pet.sourceDir);
+	if (!sourceDir) {
 		return res
 			.status(500)
 			.json({ error: "Pet source not configured on server" });
 	}
+	if (!existsSync(sourceDir)) {
+		return res.status(500).json({
+			error: `Pet source directory not found: ${sourceDir}`,
+		});
+	}
 
 	const outputFile = `${petId}-${accountId}.petpack`;
 	const outputPath = join(DOWNLOADS_DIR, outputFile);
-
-	// From services/backend/, __dirname = .../desktop-pet/services/backend
-	// ../.. = .../desktop-pet (project root)
-	const generatorBin = join(
-		__dirname,
-		"..",
-		"..",
-		"src-tauri",
-		"target",
-		"debug",
-		"generate_petpack.exe",
-	);
+	const generatorBin = resolveGeneratorBinary();
 
 	if (!existsSync(generatorBin)) {
 		return res.status(500).json({
 			error:
-				"Generator binary not found. Run: cargo build --bin generate_petpack",
+				"Generator binary not found. Run: cargo build --manifest-path src-tauri/Cargo.toml --bin generate_petpack",
 		});
 	}
 
-	// Generate petpack synchronously using spawn
 	const proc = spawn(generatorBin, [
-		pet.sourceDir,
+		sourceDir,
 		outputPath,
 		accountId,
 		entitlement.id,
@@ -185,7 +201,7 @@ app.get("/downloads/:downloadId", (req, res) => {
 // ─── Health ──────────────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.DESKTOP_PET_BACKEND_PORT || process.env.PORT || 3001;
 app.listen(PORT, () => {
 	console.log(`Desktop Pet store backend running on http://localhost:${PORT}`);
 });
