@@ -28,3 +28,8 @@ tmp
 *.sw?
 # Local Pi runtime state
 .atl/
+
+# Secrets — never commit these
+.secrets/
+*.raw.hex
+*.pem

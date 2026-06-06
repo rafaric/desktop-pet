@@ -52,8 +52,20 @@ signature.ed25519
 }
 ```
 
+## Keys
+
+This tool uses a real Ed25519 signing key. The matching public key is embedded in the desktop app.
+
+**Keep the signing key private.** For production, use server-side secrets management (env vars, HSM, Vault, etc.) and never commit the real private key to the repository.
+
+Current public key embedded in the app (base64):
+
+```
+RItbG2jKB6NFa+dwLMHiAz3fn4vbwX/yL3GopqjtGok=
+```
+
+(hex: `448baffae28e07a3456be7702cc1e2033ddf9f8bdbc17ff22f71a8a6a8ed1a89`)
+
 ## Important
 
-This is a development-only tool.
-
-It uses the same RFC/test-vector private key that matches the desktop app's temporary embedded public key. Production must replace this with server-side key management and never ship a signing key in the app or repo.
+If you rotate the signing key, update the public key in `src-tauri/src/lib.rs` and rebuild the app. Petpacks signed with the old key will stop validating.

@@ -17,11 +17,12 @@ const PETPACK_LICENSE_FILE: &str = "license.json";
 const PETPACK_SIGNATURE_FILE: &str = "signature.ed25519";
 const PETPACK_MANIFEST_FILE: &str = "manifest.json";
 
-// Development-only key matching the desktop app placeholder public key.
-// Replace with server-side key management before production.
-const DEV_SECRET_KEY_BYTES: [u8; 32] = [
-    0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60, 0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
-    0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19, 0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60,
+// Real signing key matching the public key embedded in the desktop app.
+// KEEP THIS FILE PRIVATE — it is the production signing secret.
+// For server-side use, prefer a proper secrets manager (env var, HSM, vault, etc.).
+const SIGNING_SECRET_KEY_BYTES: [u8; 32] = [
+    0x8c, 0x67, 0x5d, 0x65, 0x93, 0xea, 0xa2, 0xe6, 0x4a, 0x14, 0xf6, 0x9e, 0x30, 0x67, 0x89, 0x7a,
+    0xa8, 0x1a, 0x04, 0x0c, 0xb5, 0x59, 0xae, 0x49, 0x2e, 0x3a, 0x98, 0x1d, 0x14, 0xa9, 0xb2, 0x46,
 ];
 
 #[derive(Deserialize)]
@@ -268,7 +269,7 @@ fn sign_payload(
         "petpack": petpack,
     });
     let canonical_payload = serde_json_canonicalizer::to_vec(&payload)?;
-    let signing_key = SigningKey::from_bytes(&DEV_SECRET_KEY_BYTES);
+    let signing_key = SigningKey::from_bytes(&SIGNING_SECRET_KEY_BYTES);
     let signature = signing_key.sign(&canonical_payload);
     Ok(BASE64_STANDARD.encode(signature.to_bytes()))
 }

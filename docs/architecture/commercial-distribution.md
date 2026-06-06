@@ -69,7 +69,7 @@ The desktop app is trusted only to verify:
 3. the package is for the signed-in account;
 4. the package metadata matches the pet manifest and assets.
 
-The private signing key must never ship with the desktop app. For the MVP, the desktop app embeds the public verification key so petpacks can be validated offline after download. The current development implementation uses an RFC/test-vector public key placeholder; it must be replaced before any production release. Key rotation can be added later with a signed key-id strategy.
+The private signing key must never ship with the desktop app. The desktop app embeds the public verification key so petpacks can be validated offline after download. The signing key lives server-side (or in a secrets manager). Key rotation is supported by updating the embedded public key and regenerating petpacks with the new key. For local development, the private key is stored in `C:/proyectos/.secrets/` and is never committed.
 
 ## Petpack validation order
 
