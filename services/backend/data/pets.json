@@ -1,0 +1,20 @@
+[
+  {
+    "id": "chimmy",
+    "name": "Chimmy",
+    "description": "Mascota premium de ejemplo. Animaciones suaves y personalidad adorable.",
+    "price": 499,
+    "imageUrl": "/images/chimmy-preview.png",
+    "sourceDir": "C:/proyectos/miMascota",
+    "version": "1.0.0"
+  },
+  {
+    "id": "kero",
+    "name": "Kero",
+    "description": "Mascota de ejemplo adicional.",
+    "price": 299,
+    "imageUrl": "/images/kero-preview.png",
+    "sourceDir": null,
+    "version": "1.0.0"
+  }
+]

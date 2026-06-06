@@ -370,3 +370,60 @@ h3 {
 		padding-top: 44px;
 	}
 }
+
+/* ─── Store app ─────────────────────────────────────────────────────────────── */
+
+.store-auth,
+.store-linked {
+	margin-bottom: 24px;
+	padding: 16px;
+	border-radius: 12px;
+	background: rgba(255, 248, 238, 0.8);
+	border: 1px solid rgba(64, 48, 31, 0.15);
+}
+
+.store-auth h3 {
+	margin: 0 0 8px;
+	font-size: 1.1rem;
+}
+
+.store-auth p {
+	margin: 0 0 12px;
+	color: #66746d;
+}
+
+.account-link-form {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.store-auth input {
+	padding: 8px 12px;
+	border: 1px solid rgba(64, 48, 31, 0.25);
+	border-radius: 8px;
+	font-size: 0.9rem;
+	width: 300px;
+}
+
+.store-linked code {
+	font-size: 0.85rem;
+	background: rgba(0, 0, 0, 0.06);
+	padding: 2px 6px;
+	border-radius: 4px;
+	font-family: monospace;
+}
+
+.pet-card.owned {
+	border-color: rgba(76, 175, 80, 0.35);
+}
+
+#owned-grid:empty {
+	display: none;
+}
+
+#owned-grid p.muted {
+	color: #66746d;
+	font-style: italic;
+	margin: 0;
+}

@@ -14,6 +14,7 @@
     />
     <title>Desktop Pet Companion</title>
     <link rel="stylesheet" href="./styles.css" />
+    <script src="./store.js"></script>
   </head>
   <body>
     <header class="site-header">
@@ -83,8 +84,9 @@
             Para descargar una mascota premium, el usuario debe iniciar sesión.
             El servidor genera un petpack firmado y ligado a su cuenta.
           </p>
+          <div id="store-app"></div>
         </div>
-        <div class="pet-grid">
+        <div class="pet-grid" id="pet-grid">
           <article class="pet-card">
             <div class="pet-art">🐶</div>
             <h3>Chimmy</h3>
@@ -93,9 +95,6 @@
               <span>Premium</span>
               <strong>USD 2.99</strong>
             </div>
-            <a class="button small" href="#login-required"
-              >Ingresar para descargar</a
-            >
           </article>
           <article class="pet-card muted">
             <div class="pet-art">🦊</div>
@@ -145,6 +144,14 @@
             <p>La app valida firma/licencia y permite uso offline.</p>
           </div>
         </div>
+      </section>
+
+      <section class="panel" id="my-pets">
+        <div class="section-heading">
+          <p class="eyebrow">Mis mascotas</p>
+          <h2>Mascotas descargadas</h2>
+        </div>
+        <div id="owned-grid"></div>
       </section>
 
       <section class="notice" id="login-required">
